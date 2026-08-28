@@ -79,9 +79,27 @@ Press `M` any time to swap. Your choice and your high score persist in
 | Small saucer (wave 3+, aims at you) | 1000 |
 
 Asteroids split in two on each hit — large → medium → small → gone. Three
-lives, an extra ship every 5,000 points, and one more asteroid per wave up to
-eleven. Clear the field and the next wave arrives. Game over reports your
-score, waves survived, and shooting accuracy.
+lives and an extra ship every 4,000 points. Clear the field and the next wave
+arrives. Game over reports your score, waves survived, and shooting accuracy.
+
+## Difficulty
+
+Wave 1 is deliberately gentle — three slow rocks, no saucer, and a long
+respawn shield. One eased dial then ramps everything through wave 10: rock
+count and speed, how much of a speed kick fragments get when they split, and
+how often saucers come and how well they shoot.
+
+| Wave | Rocks | Large rock speed | Saucer | Aiming saucer |
+| --- | --- | --- | --- | --- |
+| 1 | 3 | 10 px/s | never | no |
+| 2 | 3 | 11 px/s | every ~37 s | no |
+| 4 | 5 | 14 px/s | every ~34 s | 27% of saucers |
+| 6 | 7 | 18 px/s | every ~28 s | 36% of saucers |
+| 8 | 9 | 24 px/s | every ~21 s | 47% of saucers |
+| 10+ | 11–12 | 31 px/s | every ~12 s | 60% of saucers |
+
+A motionless ship that never fires survives a median 20 s on wave 1, 10 s on
+wave 3, and under 2 s by wave 12.
 
 ## What's in the renderer
 

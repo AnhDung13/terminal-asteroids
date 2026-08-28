@@ -372,11 +372,11 @@ class Asteroid:
     # size -> (radius px, base speed px/s, points)
     SPECS = {3: (15.0, 17.0, 20), 2: (9.5, 27.0, 50), 1: (5.5, 39.0, 100)}
 
-    def __init__(self, x, y, size, level, vx=None, vy=None):
+    def __init__(self, x, y, size, scale, vx=None, vy=None, spread=0.3):
         self.x, self.y, self.size = x, y, size
         self.r, base, self.points = self.SPECS[size]
         if vx is None:
-            sp = base * (1.0 + 0.055 * level) * random.uniform(0.75, 1.3)
+            sp = base * scale * random.uniform(1.0 - spread * 0.5, 1.0 + spread)
             a = random.uniform(0, TAU)
             vx, vy = sp * math.cos(a), sp * math.sin(a)
         self.vx, self.vy = vx, vy
@@ -536,16 +536,22 @@ class Star:
 
 
 class Ufo:
-    def __init__(self, world, level):
-        self.small = level >= 3 and random.random() < 0.45
+    FIRST_WAVE = 2          # no saucers at all on wave 1
+    HUNTER_WAVE = 4         # the small one that aims at you comes later still
+
+    def __init__(self, world, level, diff):
+        self.diff = diff
+        self.small = (level >= self.HUNTER_WAVE and
+                      random.random() < 0.20 + 0.40 * diff)
         self.r = 6.0 if self.small else 9.0
         self.value = 1000 if self.small else 200
         self.y = random.uniform(world[1] * 0.15, world[1] * 0.85)
         right = random.random() < 0.5
+        speed = 24.0 + 18.0 * diff
         self.x = 1.0 if right else world[0] - 2.0
-        self.vx = (34.0 if right else -34.0) * (1.35 if self.small else 1.0)
+        self.vx = (speed if right else -speed) * (1.35 if self.small else 1.0)
         self.t = random.uniform(0, TAU)
-        self.shoot_cd = 1.1
+        self.shoot_cd = 2.6 - 1.2 * diff
 
     def update(self, dt, world, ship, bullets):
         self.t += dt
@@ -553,13 +559,14 @@ class Ufo:
         self.y = (self.y + math.sin(self.t * 1.6) * 22.0 * dt) % world[1]
         self.shoot_cd -= dt
         if self.shoot_cd <= 0 and ship is not None:
-            self.shoot_cd = random.uniform(1.0, 1.9)
+            self.shoot_cd = (2.4 - 1.45 * self.diff) * random.uniform(.85, 1.3)
             if self.small:
+                jitter = 0.30 - 0.16 * self.diff
                 a = math.atan2(ship.y - self.y, ship.x - self.x)
-                a += random.uniform(-0.16, 0.16)
+                a += random.uniform(-jitter, jitter)
             else:
                 a = random.uniform(0, TAU)
-            sp = 88.0
+            sp = 60.0 + 45.0 * self.diff
             bullets.append(Bullet(self.x, self.y, sp * math.cos(a),
                                   sp * math.sin(a), 2.0, hostile=True))
         return -14 < self.x < world[0] + 14
@@ -635,6 +642,29 @@ class Game:
             objs.append(self.ufo)
         return objs
 
+    # -- difficulty -------------------------------------------------------
+    # One dial drives everything: 0.0 on wave 1, 1.0 from wave 10 on. Wave 1
+    # is a slow drift you can pick apart; wave 10+ is the old wave-1 pace and
+    # then some.
+    RAMP_WAVES = 9.0
+
+    def diff(self):
+        # Eased rather than linear: the first few waves stay close together
+        # and the pressure back-loads onto the later ones.
+        t = max(0.0, min(1.0, (self.level - 1) / self.RAMP_WAVES))
+        return t ** 1.6
+
+    @staticmethod
+    def lerp(a, b, t):
+        return a + (b - a) * t
+
+    def rock_scale(self):
+        return self.lerp(0.60, 1.80, self.diff())
+
+    def rock_count(self):
+        # Three rocks for the first two waves, then one more each wave.
+        return min(3 + int((self.level - 1) * 0.9), 12)
+
     def wrap_dist(self, x1, y1, x2, y2):
         w, h = self.world
         dx = abs(x1 - x2)
@@ -666,14 +696,14 @@ class Game:
         self.debris = []
         self.pops = []
         self.ufo = None
-        self.ufo_timer = random.uniform(16.0, 28.0)
+        self.ufo_timer = 40.0
         self.ship = None
         self.fire_cd = 0.0
         if full:
             self.score = 0
             self.lives = 3
             self.level = 0
-            self.next_extra = 5000
+            self.next_extra = 4000
             self.shots = self.hits = 0
 
     def start_game(self):
@@ -685,20 +715,30 @@ class Game:
     def spawn_ship(self):
         w, h = self.world
         self.ship = Ship(w / 2, h / 2)
+        if self.level <= 2:
+            self.ship.invuln = 3.2
         self.shocks.append(Shock(w / 2, h / 2, 26, 5, 0.5))
 
     def spawn_wave(self):
         self.level += 1
         w, h = self.world
-        for _ in range(min(3 + self.level, 11)):
+        d = self.diff()
+        scale, spread = self.rock_scale(), 0.15 + 0.35 * d
+        for _ in range(self.rock_count()):
             while True:
                 x, y = random.uniform(0, w), random.uniform(0, h)
                 if self.wrap_dist(x, y, w / 2, h / 2) > 60:
                     break
-            self.asteroids.append(Asteroid(x, y, 3, self.level))
+            self.asteroids.append(Asteroid(x, y, 3, scale, spread=spread))
+        self.ufo_timer = min(self.ufo_timer, self.ufo_gap())
+        if self.level == Ufo.FIRST_WAVE:
+            self.ufo_timer = self.lerp(20.0, 34.0, random.random())
         if self.state != "title":
             self.flash("WAVE %d" % self.level, 1.8)
             self.sweep = 0.45
+
+    def ufo_gap(self):
+        return self.lerp(38.0, 12.0, self.diff()) * random.uniform(0.8, 1.25)
 
     def flash(self, text, t=1.4):
         self.msg, self.msg_t, self.msg_t0 = text, t, t
@@ -719,7 +759,7 @@ class Game:
         if x is not None:
             self.pops.append(Pop(x, y, "+%d" % pts, attr or A("ui_hi")))
         if self.score >= self.next_extra:
-            self.next_extra += 5000
+            self.next_extra += 4000
             self.lives += 1
             self.flash("EXTRA SHIP", 1.6)
 
@@ -833,13 +873,14 @@ class Game:
         self.bullets = [b for b in self.bullets if b.life > 0]
 
         if self.ufo is None:
-            self.ufo_timer -= dt
+            if self.level >= Ufo.FIRST_WAVE:
+                self.ufo_timer -= dt
             if self.ufo_timer <= 0 and self.asteroids:
-                self.ufo = Ufo(self.world, self.level)
+                self.ufo = Ufo(self.world, self.level, self.diff())
                 self.flash("SAUCER", 1.0)
         elif not self.ufo.update(dt, self.world, self.ship, self.bullets):
             self.ufo = None
-            self.ufo_timer = random.uniform(18.0, 32.0)
+            self.ufo_timer = self.ufo_gap()
 
         self.collisions()
         if not self.asteroids and self.ufo is None:
@@ -872,7 +913,7 @@ class Game:
             w, h = self.world
             edge = random.random()
             self.asteroids.append(Asteroid(
-                w * edge, 0 if random.random() < 0.5 else h - 1, 3, 2))
+                w * edge, 0 if random.random() < 0.5 else h - 1, 3, 1.0))
 
     def collisions(self):
         for b in list(self.bullets):
@@ -893,7 +934,7 @@ class Game:
                     self.shocks.append(Shock(u.x, u.y, 4, 34, 0.5))
                     self.shake = 0.3
                     self.ufo = None
-                    self.ufo_timer = random.uniform(18.0, 32.0)
+                    self.ufo_timer = self.ufo_gap()
                     self.hits += 1
                     if b in self.bullets:
                         self.bullets.remove(b)
@@ -914,7 +955,7 @@ class Game:
                 self.burst(u.x, u.y, 24, 80, 0.8)
                 self.shocks.append(Shock(u.x, u.y, 4, 30, 0.5))
                 self.ufo = None
-                self.ufo_timer = random.uniform(18.0, 32.0)
+                self.ufo_timer = self.ufo_gap()
             return
         for b in list(self.bullets):
             if b.hostile and self.wrap_dist(s.x, s.y, b.x, b.y) < Ship.RADIUS + 2:
@@ -932,10 +973,13 @@ class Game:
         self.shake = max(self.shake, 0.05 * a.size)
         self.asteroids.remove(a)
         if a.size > 1:
+            d = self.diff()
             for _ in range(2):
                 ang = random.uniform(0, TAU)
-                sp = math.hypot(a.vx, a.vy) * random.uniform(1.1, 1.55) + 6.0
-                child = Asteroid(a.x, a.y, a.size - 1, self.level,
+                sp = (math.hypot(a.vx, a.vy) *
+                      random.uniform(1.05, 1.2 + 0.35 * d) +
+                      self.lerp(1.5, 5.5, d))
+                child = Asteroid(a.x, a.y, a.size - 1, self.rock_scale(),
                                  sp * math.cos(ang), sp * math.sin(ang))
                 child.flash = 0.08
                 self.asteroids.append(child)
