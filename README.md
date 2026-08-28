@@ -49,6 +49,8 @@ fallback.
 | Key | Action |
 | --- | --- |
 | `↑ ↓ ← →` / `WASD` | fly (arcade) · turn, thrust, retro-burn (classic) |
+| `Y` `U` `B` `N` | one-key diagonals: up-left, up-right, down-left, down-right |
+| `7` `9` `1` `3` | the same four diagonals, on the keypad |
 | `Space` | fire — also launches from the title screen |
 | `X` | hyperspace: jump somewhere else, 3s cooldown |
 | `M` | switch flight model |
@@ -59,8 +61,10 @@ fallback.
 ## Two flight models
 
 **ARCADE** (default) — press a direction and the ship accelerates that way,
-diagonals included, with the nose swinging smoothly to face your input. Strong
-damping means you stop when you let go. Forgiving, quick to pick up.
+with the nose swinging smoothly to face your input, and it glides to a stop
+when you let go. Firing never interrupts your flying. For diagonals, either
+hold two arrows or use a single diagonal key (`Y U B N`) — see the input note
+at the bottom for why one key is the more reliable of the two.
 
 **CLASSIC** — the 1979 model. `←→` rotate, `↑` thrusts along the nose, `↓` is a
 weak retro burn, and there are no brakes: momentum is yours to manage.
@@ -77,6 +81,11 @@ Press `M` any time to swap. Your choice and your high score persist in
 | Small asteroid | 100 |
 | Saucer | 200 |
 | Small saucer (wave 3+, aims at you) | 1000 |
+
+Your shots burn out when they reach the edge of the field rather than wrapping
+around it, and their range scales with your window, so a shot always crosses
+the same fraction of the screen whether you play in a small terminal or
+fullscreen.
 
 Asteroids split in two on each hit — large → medium → small → gone. Three
 lives and an extra ship every 4,000 points. Clear the field and the next wave
@@ -133,7 +142,22 @@ Runs 1,500 frames of simulation and rendering headlessly — every game state,
 both flight models, two mid-run resizes — and reports draw cost per frame. It
 writes its save file to a temp path, so your high score is left alone.
 
-Terminals report key presses but never key releases, so a held key is emulated:
-a press counts as "held" for 200 ms, and key-repeat keeps it topped up. That is
-what makes rotation and thrust feel continuous, and what lets two arrow keys
-combine into a diagonal.
+### A note on holding keys
+
+Terminals report key presses but never key releases, and the OS auto-repeats
+only the *most recently pressed* key. Two consequences, both of which the
+input layer has to work around:
+
+- A press has to be treated as a hold that expires. The first press opens a
+  0.62 s window — long enough to cover the OS "delay until repeat" — and each
+  repeat afterwards extends it by 0.26 s.
+- Tapping fire stops your arrow key from repeating, and holding two arrows
+  silences whichever you pressed first. So any key event also keeps recently
+  pressed directions alive at reduced, tapering strength ("carry"). Firing,
+  warping and pausing therefore never stall the ship, and two arrows give
+  about 1.5 s of genuine diagonal that then curves off. Pressing the opposite
+  direction cancels a carried direction immediately.
+
+A single held key repeats reliably forever, which is why `Y U B N` give a
+perfect, indefinitely sustained diagonal where two arrows can only
+approximate one.

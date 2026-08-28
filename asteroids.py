@@ -280,7 +280,7 @@ class Ship:
     ACC_CLASSIC = 135.0
     ACC_ARCADE = 320.0
     DRAG_CLASSIC = 0.5
-    DRAG_ARCADE = 3.6
+    DRAG_ARCADE = 2.2      # glide a little, so diagonals hold their line
     SNAP = 13.0            # arcade: rad/s the nose swings toward your input
     MAX_SPEED = 105.0
 
@@ -296,8 +296,9 @@ class Ship:
     def fly_arcade(self, dt, ix, iy, world):
         if ix or iy:
             n = math.hypot(ix, iy)
-            self.vx += self.ACC_ARCADE * ix / n * dt
-            self.vy += self.ACC_ARCADE * iy / n * dt
+            k = (1.0 / n) if n > 1.0 else 1.0    # clamp, don't normalise:
+            self.vx += self.ACC_ARCADE * ix * k * dt   # a carried key pushes
+            self.vy += self.ACC_ARCADE * iy * k * dt   # at partial strength
             self.thrust = min(1.0, self.thrust + dt * 8)
             want = math.atan2(iy, ix)
             d = (want - self.ang + math.pi) % TAU - math.pi
@@ -418,19 +419,35 @@ class Bullet:
         self.life = life
         self.hostile = hostile
 
+    SPEED = 190.0
+
+    @staticmethod
+    def reach(world, speed=None):
+        """Time to cross the field corner to corner, plus a margin.
+
+        Bullets are killed by the edge of the field, never by a stopwatch, so
+        the range you get is the same fraction of the window at any size.
+        """
+        return math.hypot(*world) / (speed or Bullet.SPEED) * 1.2
+
     def update(self, dt, world):
-        self.x = (self.x + self.vx * dt) % world[0]
-        self.y = (self.y + self.vy * dt) % world[1]
+        self.x += self.vx * dt
+        self.y += self.vy * dt
         self.life -= dt
+        # Bullets do not wrap - they burn out on the edge of the field.
+        if not (0.0 <= self.x < world[0] and 0.0 <= self.y < world[1]):
+            self.life = 0.0
 
     def draw(self, f):
         att = A("ufoshot") if self.hostile else A("bullet")
-        f.dot(self.x, self.y, att, 5)
-        # short motion trail
-        n = 2 if self.hostile else 3
-        for i in range(1, n + 1):
-            f.dot(self.x - self.vx * 0.012 * i, self.y - self.vy * 0.012 * i,
-                  ramp("fire", 0.35 + 0.2 * i) if not self.hostile else att, 4)
+        # A tracer streak from where it was to where it is - a lone dot moving
+        # four pixels a frame is nearly impossible to follow.
+        step = 0.016
+        f.line(self.x - self.vx * step, self.y - self.vy * step,
+               self.x, self.y, att, 5)
+        for i in (2, 3, 4):
+            f.dot(self.x - self.vx * step * i, self.y - self.vy * step * i,
+                  att if self.hostile else ramp("fire", 0.2 + 0.2 * i), 4)
 
 
 class Particle:
@@ -568,7 +585,8 @@ class Ufo:
                 a = random.uniform(0, TAU)
             sp = 60.0 + 45.0 * self.diff
             bullets.append(Bullet(self.x, self.y, sp * math.cos(a),
-                                  sp * math.sin(a), 2.0, hostile=True))
+                                  sp * math.sin(a),
+                                  Bullet.reach(world, sp), hostile=True))
         return -14 < self.x < world[0] + 14
 
     def draw(self, f):
@@ -768,15 +786,16 @@ class Game:
         s = self.ship
         if s is None or self.fire_cd > 0:
             return
-        if sum(1 for b in self.bullets if not b.hostile) >= 5:
+        if sum(1 for b in self.bullets if not b.hostile) >= 8:
             return
         self.fire_cd = 0.14
-        sp = 155.0
+        sp = Bullet.SPEED
         nose = s.hull()[0]
         self.bullets.append(Bullet(
             nose[0] % self.world[0], nose[1] % self.world[1],
             sp * math.cos(s.ang) + s.vx * 0.3,
-            sp * math.sin(s.ang) + s.vy * 0.3, 0.85))
+            sp * math.sin(s.ang) + s.vy * 0.3,
+            Bullet.reach(self.world)))
         if self.state != "title":
             self.shots += 1
         # muzzle flash
@@ -806,7 +825,7 @@ class Game:
         self.save_state()
 
     # -- update -----------------------------------------------------------
-    def update(self, dt, held):
+    def update(self, dt, keys):
         self.msg_t = max(0.0, self.msg_t - dt)
         self.shake = max(0.0, self.shake - dt)
         self.sweep = max(0.0, self.sweep - dt)
@@ -852,12 +871,13 @@ class Game:
         s = self.ship
         if s:
             if self.mode == "arcade":
-                ix = (1 if held("right") else 0) - (1 if held("left") else 0)
-                iy = (1 if held("down") else 0) - (1 if held("up") else 0)
+                ix = keys.axis("right") - keys.axis("left")
+                iy = keys.axis("down") - keys.axis("up")
                 s.fly_arcade(dt, ix, iy, self.world)
             else:
-                turn = (1 if held("left") else 0) - (1 if held("right") else 0)
-                s.fly_classic(dt, turn, held("up"), held("down"), self.world)
+                turn = keys.axis("left") - keys.axis("right")
+                s.fly_classic(dt, turn, keys.held("up"), keys.held("down"),
+                              self.world)
             if s.thrust > 0.3 and random.random() < 0.5:
                 back = s.ang + math.pi
                 self.particles.append(Particle(
@@ -1107,9 +1127,12 @@ class Game:
             sc.text(w - len(warp) - 3, y, " " + warp + " ",
                     A("ui_hi") if bars == 4 else A("dim"))
         hints = [
-            ("↑↓←→ move  SPACE fire  X warp  M model  P pause  Q quit"
+            ("↑↓←→ move  YUBN diagonal  SPACE fire  X warp  M model  Q quit"
              if self.mode == "arcade" else
              "←→ turn  ↑ thrust  SPACE fire  X warp  M model  P pause  Q quit"),
+            ("↑↓←→ YUBN move  SPACE fire  X warp  Q quit"
+             if self.mode == "arcade" else
+             "←→ turn  ↑ thrust  SPACE fire  X warp  Q quit"),
             "MOVE · FIRE · WARP",
         ]
         for hint in hints:
@@ -1185,7 +1208,8 @@ class Game:
             sc.ctext(y + i, s, ramp("title", i / max(1, len(lines) - 1) * 0.8))
         y += len(lines) + 1
         mode = "ARCADE" if self.mode == "arcade" else "CLASSIC"
-        moves = ("↑ ↓ ← →   fly anywhere" if self.mode == "arcade"
+        moves = ("↑ ↓ ← →  fly      Y U B N  diagonals"
+                 if self.mode == "arcade"
                  else "← → turn      ↑ thrust      ↓ retro")
         rows = [
             (0, moves, A("ui_hi")),
@@ -1221,12 +1245,92 @@ class Game:
 # Main loop
 # ==========================================================================
 KEYMAP = {
-    curses.KEY_LEFT: "left", ord("a"): "left", ord("A"): "left",
-    curses.KEY_RIGHT: "right", ord("d"): "right", ord("D"): "right",
-    curses.KEY_UP: "up", ord("w"): "up", ord("W"): "up",
-    curses.KEY_DOWN: "down", ord("s"): "down", ord("S"): "down",
+    curses.KEY_LEFT: ("left",), ord("a"): ("left",), ord("A"): ("left",),
+    curses.KEY_RIGHT: ("right",), ord("d"): ("right",), ord("D"): ("right",),
+    curses.KEY_UP: ("up",), ord("w"): ("up",), ord("W"): ("up",),
+    curses.KEY_DOWN: ("down",), ord("s"): ("down",), ord("S"): ("down",),
+    # One-key diagonals. Holding two arrows can only ever be approximated
+    # (see Keys), but a single held key repeats reliably, so these give a
+    # true, indefinitely sustained diagonal.
+    ord("u"): ("up", "right"), ord("U"): ("up", "right"),
+    ord("y"): ("up", "left"), ord("Y"): ("up", "left"),
+    ord("n"): ("down", "right"), ord("N"): ("down", "right"),
+    ord("b"): ("down", "left"), ord("B"): ("down", "left"),
+    ord("9"): ("up", "right"), ord("7"): ("up", "left"),
+    ord("3"): ("down", "right"), ord("1"): ("down", "left"),
 }
-HOLD = 0.20        # terminals send key-repeat, never key-up: fake a hold
+
+
+class Keys:
+    """Held-key emulation, because terminals never report a key release.
+
+    Two facts drive the whole design. A terminal sends a keypress and then,
+    after the OS "delay until repeat" (~0.5s), a fast repeat train - so a
+    press has to be treated as a hold that expires. And the OS auto-repeats
+    only the *most recently pressed* key: tap fire while flying and the arrow
+    stops repeating; hold two arrows and the first one goes quiet.
+
+    So a press opens a generous window that covers the repeat delay, and any
+    other key event keeps recently-used directions alive at reduced strength
+    ("carry"). That is what lets you shoot without stalling and hold two
+    arrows for a diagonal. Carry is bounded from each direction's own last
+    real press, so releasing a key still stops you.
+    """
+
+    FIRST = 0.62        # a fresh press: bridges the OS repeat delay
+    REPEAT = 0.26       # a repeat: bridges the gap between repeats
+    # Carry has to outlast the OS repeat delay: when you add a second arrow,
+    # its repeat train only starts ~0.5s later, and the first arrow has gone
+    # quiet by then. 1.25s bridges that gap, and bounds how long a direction
+    # can survive if you really did let go.
+    CARRY = 1.25        # how long another key may keep a direction alive
+    CARRY_HI = 0.70     # carried push right after the last real press...
+    CARRY_LO = 0.20     # ...fading to this as the carry window runs out
+    DIRS = ("left", "right", "up", "down")
+    OPPOSITE = {"left": "right", "right": "left", "up": "down", "down": "up"}
+
+    def __init__(self):
+        self.real = dict.fromkeys(self.DIRS, -9.0)    # last genuine press
+        self.hold = dict.fromkeys(self.DIRS, -9.0)    # genuine hold expiry
+        self.carried = dict.fromkeys(self.DIRS, -9.0)  # carried hold expiry
+        self.now = 0.0
+
+    def tick(self, now):
+        self.now = now
+
+    def press(self, names, now):
+        for name in names:
+            fresh = now >= self.hold[name]
+            self.hold[name] = now + (self.FIRST if fresh else self.REPEAT)
+            self.real[name] = now
+            opp = self.OPPOSITE[name]
+            if opp not in names:                       # reversing cancels
+                self.real[opp] = self.hold[opp] = self.carried[opp] = -9.0
+        self.other(now, skip=names)
+
+    def other(self, now, skip=()):
+        """Any key event at all keeps recently-pressed directions alive."""
+        for name in self.DIRS:
+            if name not in skip and now - self.real[name] < self.CARRY:
+                self.carried[name] = max(self.carried[name], now + self.REPEAT)
+
+    def axis(self, name):
+        """0.0 not held, 1.0 genuinely held, tapering in between if carried.
+
+        A carried direction fades rather than cutting out: held as half of a
+        two-arrow diagonal it reads as a smooth curve, and in the case where
+        the key really was released it reads as ordinary drift.
+        """
+        now = self.now
+        if now < self.hold[name]:
+            return 1.0
+        if now < self.carried[name]:
+            t = min(1.0, max(0.0, (now - self.real[name]) / self.CARRY))
+            return self.CARRY_HI + (self.CARRY_LO - self.CARRY_HI) * t
+        return 0.0
+
+    def held(self, name):
+        return self.axis(name) > 0.0
 
 
 def run(stdscr):
@@ -1245,12 +1349,8 @@ def run(stdscr):
         return
 
     game = Game(w, h)
-    press = {k: -9.0 for k in ("left", "right", "up", "down")}
+    keys = Keys()
     now = time.perf_counter()
-
-    def held(name):
-        return now - press[name] < HOLD
-
     last = now
     frame = 1.0 / FPS
     while True:
@@ -1267,9 +1367,14 @@ def run(stdscr):
                 if w >= MIN_W and h >= MIN_H:
                     game.resize(w, h)
                     stdscr.erase()
-            elif c in KEYMAP:
-                press[KEYMAP[c]] = now
-            elif c in (ord("q"), ord("Q")):
+                continue
+            if c in KEYMAP:
+                keys.press(KEYMAP[c], now)
+                continue
+            # Any other key keeps the current heading alive, so firing,
+            # warping or pausing never stalls the ship.
+            keys.other(now)
+            if c in (ord("q"), ord("Q")):
                 if game.score > game.high:
                     game.high = game.score
                 game.save_state()
@@ -1293,7 +1398,8 @@ def run(stdscr):
                 elif game.state == "play":
                     game.fire()
 
-        game.update(dt, held)
+        keys.tick(now)
+        game.update(dt, keys)
         game.draw(stdscr)
         stdscr.noutrefresh()
         curses.doupdate()
@@ -1312,14 +1418,18 @@ def selftest(frames=1500):
     t0 = time.perf_counter()
     g = Game(110, 34)
     g.start_game()
-    hold = {"left": False, "right": False, "up": False, "down": False}
+    keys = Keys()
     draw_ns = 0.0
     for i in range(frames):
-        hold["left"] = (i // 31) % 3 == 0
-        hold["right"] = (i // 43) % 4 == 0
-        hold["up"] = (i // 17) % 2 == 0
-        hold["down"] = (i // 91) % 5 == 0
-        g.update(1 / FPS, lambda n: hold[n])
+        t = i / FPS
+        keys.tick(t)
+        for code, names in ((0, ("right",)), (1, ("up",)), (2, ("up", "right")),
+                            (3, ("left",)), (4, ("down",))):
+            if (i // 23) % 5 == code:
+                keys.press(names, t)
+        if i % 8 == 0:
+            keys.other(t)
+        g.update(1 / FPS, keys)
         if i % 8 == 0:
             g.fire()
         if i % 300 == 299:
