@@ -774,6 +774,7 @@ class Game:
         self.state = "play"
         self.spawn_wave()
         self.spawn_ship()
+        self.flash("%s FLIGHT" % self.mode.upper(), 1.6)
 
     def spawn_ship(self):
         w, h = self.world
@@ -933,9 +934,7 @@ class Game:
         s = self.ship
         if s:
             if self.mode == "arcade":
-                ix = keys.axis("right") - keys.axis("left")
-                iy = keys.axis("down") - keys.axis("up")
-                s.fly_arcade(dt, ix, iy, self.world)
+                s.fly_arcade(dt, keys.hx, keys.hy, self.world)
             else:
                 turn = keys.axis("left") - keys.axis("right")
                 s.fly_classic(dt, turn, keys.held("up"), keys.held("down"),
@@ -1195,10 +1194,11 @@ class Game:
             sc.text(right, y, " " + warp + " ",
                     A("ui_hi") if bars == 4 else A("dim"))
         hints = [
-            ("↑↓←→ move  YUBN diagonal  SPACE fire  X warp  M model  Q quit"
+            ("↑↓←→ set course  YUBN diagonal  0 stop  SPACE fire  X warp"
+             "  M model  Q quit"
              if self.mode == "arcade" else
              "←→ turn  ↑ thrust  SPACE fire  X warp  M model  P pause  Q quit"),
-            ("↑↓←→ YUBN move  SPACE fire  X warp  Q quit"
+            ("↑↓←→ course  0 stop  SPACE fire  X warp  M model  Q quit"
              if self.mode == "arcade" else
              "←→ turn  ↑ thrust  SPACE fire  X warp  Q quit"),
             "MOVE · FIRE · WARP",
@@ -1278,19 +1278,20 @@ class Game:
             sc.ctext(y + i, s, ramp("title", i / max(1, len(lines) - 1) * 0.8))
         y += len(lines) + 1
         mode = "ARCADE" if self.mode == "arcade" else "CLASSIC"
-        moves = ("↑ ↓ ← →  fly      Y U B N  diagonals"
+        moves = ("↑ ↓ ← →  set course      Y U B N  diagonals      0  stop"
                  if self.mode == "arcade"
                  else "← → turn      ↑ thrust      ↓ retro")
         rows = [
             (0, moves, A("ui_hi")),
-            (1, "SPACE fire      X hyperspace      P pause", A("ui")),
-            (2, "M  flight model:  %s" % mode, A("warn")),
-            (4, "rocks 20 / 50 / 100      saucer 200 / 1000", A("dim")),
+            (1, "one press steers - no need to hold a key down", A("dim")),
+            (2, "SPACE fire      X hyperspace      P pause", A("ui")),
+            (3, "M  flight model:  %s" % mode, A("warn")),
+            (5, "rocks 20 / 50 / 100      saucer 200 / 1000", A("dim")),
         ]
         if self.high:
-            rows.append((5, "high score  %d" % self.high, A("accent")))
+            rows.append((6, "high score  %d" % self.high, A("accent")))
         pulse = math.sin(time.time() * 4.0) > 0
-        rows.append((7, "───  PRESS  SPACE  TO  LAUNCH  ───",
+        rows.append((8, "───  PRESS  SPACE  TO  LAUNCH  ───",
                      A("warn") if pulse else A("dim")))
         for dy, text, attr in rows:
             self.matte(sc, y + dy, len(text))
@@ -1368,6 +1369,7 @@ class Keys:
     OPPOSITE = {"left": "right", "right": "left", "up": "down", "down": "up"}
 
     def __init__(self):
+        self.hx = self.hy = 0.0                       # sticky course (arcade)
         self.real = dict.fromkeys(self.DIRS, -9.0)    # last genuine press
         self.hold = dict.fromkeys(self.DIRS, -9.0)    # genuine hold expiry
         self.carried = dict.fromkeys(self.DIRS, -9.0)  # carried hold expiry
@@ -1381,7 +1383,22 @@ class Keys:
     def tick(self, now):
         self.now = now
 
+    def course(self, names):
+        """Arcade steering: the last direction pressed is where you go.
+
+        No timers, no repeat, no release: one press sets a course and the ship
+        holds it until you press another direction or the brake. A key-repeat
+        train just re-affirms the same course, so it does not matter whether
+        the terminal repeats fast, slowly, or not at all.
+        """
+        self.hx = float(("right" in names) - ("left" in names))
+        self.hy = float(("down" in names) - ("up" in names))
+
+    def brake(self):
+        self.hx = self.hy = 0.0
+
     def press(self, names, now):
+        self.course(names)
         for name in names:
             fresh = now >= self.hold[name]
             # A press this soon after the last one is a repeat, whether or not
@@ -1444,6 +1461,7 @@ def run(stdscr):
 
     game = Game(w, h)
     keys = Keys()
+    prev_state = game.state
     now = time.perf_counter()
     last = now
     frame = 1.0 / FPS
@@ -1480,6 +1498,8 @@ def run(stdscr):
                     game.state = "play"
             elif c in (ord("m"), ord("M")):
                 game.toggle_mode()
+            elif c in (ord("."), ord(","), ord("0"), ord("5")):
+                keys.brake()
             elif c in (ord("x"), ord("X")):
                 if game.state == "play":
                     game.hyperspace()
@@ -1492,6 +1512,10 @@ def run(stdscr):
                 elif game.state == "play":
                     game.fire()
 
+        if game.state != prev_state:
+            if game.state != "play":
+                keys.brake()          # a new ship starts stationary
+            prev_state = game.state
         keys.tick(now)
         game.advance(dt, keys)
         game.draw(stdscr)

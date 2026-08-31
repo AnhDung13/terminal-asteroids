@@ -10,28 +10,28 @@ come out square. Circles are round, rotation is smooth, and everything moves
 sub-character instead of jumping from cell to cell.
 
 ```
-╭─ SCORE 3310 ─ ▲ ▲ ▲ ──────────────────── WAVE 3  ◆◆◆◆◆ ─────────────────────────────── HIGH 8420 ╮
-│⠁⠁⠉⠈⠈⠂⠢⢀              ⠈⢢  ⢀⡠⠔⠁                                                    ⣀⠔⢑⠉⠈⢑   ⢀⢀⠜⡎⠈⠁⠁│
-│        ⠑⠠⡀             ⠣⠒⠁                          ⠠                          ⢀⠎  ⠈⢢⠲⢚ ⢀⠐⠁  ⢇   │
-│          ⠈⢄               ⠁                                         ⠂         ⢀⠎  ⡠⠐⠢⡑⠈⠔⠁   ⢀⡸   │
-│⣀⣀          ⠢                                       ⡀                          ⠘⡄  ⢅⢀⣀⠌⡊     ⣠⠃   │
-│⠤⠲⠚⡵⡢⡀      ⠈⡂     ⡀                                                            ⠸⡀    ⠨  ⣀⠤⠒⠉ ⢀⠔⢢⡽│
-│+20 ⠈⠹⡄ ⠄    ⠨                                                                   ⠉⠒⠒⠤⠤⡓⠊⠉    ⢀⠌⠈⢸⢔│
-│+50⡵⡄ ⢹⡀     ⢘                               ⢠⠤⠤⢄                                     ⠅      ⢘⢀⢠⢏⠞│
-│⡙⣚⠵⣓⠵⢀⡮      ⠰                      ⠠     ⢀⠤⠔⠓⠒⠒⠚⠢⠤⡀                    ⠁             ⡃      ⢨⠔ ⠻⣦│
-│⠝⠒⠛⠒⢒⠕⠁     ⢀⠅                        ⠂   ⠘⠤⠦⣀⣀⣀⣀⢴⠤⠊                                  ⠰    ⠠ ⠁⠱⡐ ⠈│
-│⢄⡠⠠⠔⠁       ⠔                                ⠈⠑⠔⠊⠁                                  ⠁  ⢃ ⡀⠈    ⠈⠂⠤│
-│          ⡠⠊                                                                           ⢀⠥⡀        │
-│⠠       ⡠⠰                                                                          ⢀⡠⡖⠁ ⠈⠐⢄      │
-│  ⣀⢀⠠⠄⠊⠈                                       ⡀                                 ⣠⡔⡊⠃⡜      ⠈⠂⠤⢀⡀⡀│
-│⠁⠁                      ⢀                                                       ⢀⣀⠿⢣⡜             │
-│                     ⣀⠔⠒⠒⠤⠤⠤⣀⡀                                                ⢀⠠⠂⠁ ⠈              │
-│                  ⢂⠤⠊  ⡔⢐⢒⠈⠢ ⠈⠑⠢⡀                                            ⡀⠲                  ⡀│
-│                  ⠘⡄   ⢆⢈⠼⢀⠴⡁   ⠈⠢⡀                ⠈                       ⣠ ⠄                    │
-│         ⠠         ⢣      ⠡⣀⠌    ⡠⠊                                       ⠠                       │
-│                   ⠈⠢⡀         ⢀⠔⠁       ⢀                               ⠂     ⠂        ⣀⣀⣀⣀⣀     │
-│                     ⠑⢄      ⢀⠔⠁                                                    ⢀⠔⠊⠉    ⠈⡆    │
-╰─ ARCADE AUTO-FIRE ─── ↑↓←→ move  YUBN diagonal  F auto-fire  X warp  M model  Q quit ─ WARP ▰▰▰▰ ╯
+╭─ SCORE 3260 ─ ▲ ▲ ────────────────────── WAVE 3  ◆◆◆◆◆ ─────────────────────────────── HIGH 8420 ╮
+│⠄⡀                   ⠱⡀  ⣀⠤⠊                                                    ⢀⠔⢩⠐⠢⡀     ⡇ ⢀ ⡄  │
+│⠈⠐⠊⠔⡠                 ⠱⠒⠉                         ⠠                           ⢠⠊⠁ ⢑⣠⣠⡊    ⠠⣸⠘⠈⠈   │
+│    ⠐⠌⠐⡀                ⠐                                         ⠄          ⢠⠃  ⡀⠤⡢⠠⠊ ⢀⠐⡘⠁⡈⡆     │
+│      ⢑ ⢂                                                                    ⢇  ⠐⡁ ⢈⠂ ⢀⠂⠅  ⢰⠁⣀⠤⣀  │
+│0⠒⠢⡄⠄  ⢂ ⠄                                       ⠁                           ⠈⢆  ⠁⠒⠁  ⠄⠌⣀⡤⠴⢧⠎⣰⢒⢤  │
+│⠖  ⠚⣄  ⠰ ⠡      ⠁                            ⣀⣀⡀                              ⠈⠒⠤⣀ ⣀⣀⢬⠔⡋⠁  ⠜⡜⠕⠋⠳  │
+│⣥⡾⠤⠊⠄  ⠨ ⢐                                ⣀⡠⠼⠤⠤⠼⠤⣀⡀                               ⠉ ⢠⢚ ⡂⠠⢄⣲⢅⢳⡺⠵⣶  │
+│⢖     ⠠⠁ ⠄                        ⠄      ⠸⣅⡄     ⣄⡽                  ⠂              ⡌⠠ ⠐⣁⠤⣞⣿⣗⠾⣽⠐  │
+│  ⢀  ⡀⠊ ⠠⠁                        ⠠     «   SHIP LOST   »                           ⠣ ⠡⠐⡵⢵⠈⠿⢲⢅⢁⡩  │
+│ ⠁⡀⠄⠊  ⠄⠁                                                                        ⠁  ⠘⢄ ⡥⠁⠁⠂⢅⠁     │
+│⠐⠈  ⢀⠠⠈                                                                              ⡘⠛⢄⡈⠠⢀ ⠈⠐⣐⠖  │
+│⡀⡀⠠⠐   ⡀                                                                                ⠈⠁⠑⠒⠡⢉ ⡀  │
+│                                                                                 ⠐                │
+│                      ⡀                    ⠈                                    ⠤                 │
+│                    ⣀⠤⠒⠒⠢⠤⠤⣀                                                                      │
+│               ⠄  ⡖⠉  ⡔⠐⡦⠒⠢ ⠉⠒⢄                                                               ⢀   │
+│                  ⢣   ⢅⢀⠕⣁⣔⠁  ⠈⠢⡀               ⠐                                                 │
+│      ⢀           ⢸      ⠇⣀⠕    ⢑⠄                                                                │
+│                   ⢣          ⢀⠔⠁                                           ⠄                     │
+│                    ⠣⡀      ⣀⠔⠁       ⠈                                            ⡠⠤⠔⠒⠒⠒⠒⢲       │
+╰─ ARCADE ─────────── ↑↓←→ course  0 stop  SPACE fire  X warp  M model  Q quit ───────── WARP ▰▰▰▰ ╯
 ```
 
 ## Run
@@ -48,11 +48,11 @@ fallback.
 
 | Key | Action |
 | --- | --- |
-| `↑ ↓ ← →` / `WASD` | fly (arcade) · turn, thrust, retro-burn (classic) |
+| `↑ ↓ ← →` / `WASD` | set course (arcade) · turn, thrust, retro-burn (classic) |
 | `Y` `U` `B` `N` | one-key diagonals: up-left, up-right, down-left, down-right |
 | `7` `9` `1` `3` | the same four diagonals, on the keypad |
 | `Space` | fire — also launches from the title screen |
-| `F` | auto-fire on/off (on by default) |
+| `0` `.` `,` `5` | stop (arcade) |
 | `X` | hyperspace: jump somewhere else, 3s cooldown |
 | `M` | switch flight model |
 | `P` | pause |
@@ -61,13 +61,16 @@ fallback.
 
 ## Two flight models
 
-**ARCADE** (default) — press a direction and the ship goes that way; let go and
-it stops within about 0.2 s, drifting roughly an eighth of the screen. The nose
-swings to face your input on a damped spring. Auto-fire is on by default, so the
-keyboard is yours for steering and you never have to hold two keys at once —
-the thing terminals handle worst. For diagonals, either hold two arrows or use a
-single diagonal key (`Y U B N`) — see the input note at the bottom for why one
-key is the more reliable of the two.
+**ARCADE** (default) — **you do not hold keys down.** One press sets a course
+and the ship holds it until you press another direction or press `0` to stop.
+`Y U B N` set the four diagonals. The nose follows your course on a damped
+spring, and the ship reaches or leaves its cruise speed in 75 ms, so it starts
+and stops with the key instead of sliding around.
+
+This exists because holding a key is the one thing terminals genuinely cannot
+do — see the note at the end. Against a bot steering at a human-ish 5–10
+presses per second, sticky course survives 3–4× longer than the old
+hold-to-move model.
 
 **CLASSIC** — the 1979 model. `←→` rotate, `↑` thrusts along the nose, `↓` is a
 weak retro burn, and there are no brakes: momentum is yours to manage.
@@ -166,28 +169,31 @@ writes its save file to a temp path, so your high score is left alone.
 ### A note on holding keys
 
 Terminals report key presses but never key releases, and the OS auto-repeats
-only the *most recently pressed* key. Two consequences, both of which the
-input layer has to work around:
+only the *most recently pressed* key. Worse, the delay before that repeat train
+starts is a user setting — and for some setups arrows do not repeat at all. Any
+scheme that treats a press as "held until a timer runs out" therefore stutters:
+the ship flies for a moment, stops, and starts again when the repeats arrive.
 
-- A press has to be treated as a hold that expires. The first press opens a
-  0.62 s window — long enough to cover the OS "delay until repeat" — and each
-  repeat afterwards extends it by 0.26 s.
-- Tapping fire stops your arrow key from repeating, and holding two arrows
-  silences whichever you pressed first. So any key event also keeps recently
-  pressed directions alive at reduced, tapering strength ("carry"). Firing,
-  warping and pausing therefore never stall the ship, and two arrows give
-  about 1.5 s of genuine diagonal that then curves off. Pressing the opposite
-  direction cancels a carried direction immediately.
+**Arcade sidesteps all of it.** One press sets a course, so there is nothing to
+hold and no window to expire. A repeat train just re-affirms the course you
+already set, which means it stops mattering whether the terminal repeats
+quickly, slowly, or not at all. Holding the Right arrow for six seconds, the
+share of that time the ship is actually moving:
 
-A single held key repeats reliably forever, which is why `Y U B N` give a
-perfect, indefinitely sustained diagonal where two arrows can only approximate
-one. Auto-fire exists for the same reason: with the gun running itself there is
-no second key to hold, so steering stays exact.
+| terminal / OS key-repeat | hold model | sticky course |
+| --- | --- | --- |
+| fast repeat (0.25 s, 30/s) | 99% | 100% |
+| macOS default (0.5 s, 25/s) | 99% | 100% |
+| slow repeat (1.2 s, 10/s) | 99% | 100% |
+| very slow (2.0 s, 6/s) | 88% | 100% |
+| repeat disabled — one press | **22%** | **100%** |
 
-Carry is deliberately asymmetric. A *direction* press carries the other
-directions for only 0.40 s, because a ship that keeps flying after you let go
-is the most infuriating thing there is; a fire or warp press carries them for
-1.0 s, since pressing those says nothing about whether you meant to change
-course. The first-press window is not a fixed guess either — the repeat delay
-is a user setting, so the game watches for the first repeat of a held key and
-learns it, clamped to 0.34–1.15 s.
+That last row is the stutter: with repeat off, the old model flew for half a
+second and stopped no matter how long you held the key.
+
+Classic mode still uses the hold model, since rotate-and-thrust has no sensible
+sticky form. There a press opens a window long enough to cover the repeat
+delay, any other key event keeps recently pressed directions alive at tapering
+strength, and the delay itself is learned from the first repeat of a held key
+rather than guessed. `Y U B N` remain the reliable way to hold a diagonal,
+because a single held key is the one thing that does repeat predictably.
