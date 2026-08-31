@@ -10,28 +10,28 @@ come out square. Circles are round, rotation is smooth, and everything moves
 sub-character instead of jumping from cell to cell.
 
 ```
-╭─ SCORE 3260 ─ ▲ ▲ ▲ ───────────── WAVE 3  ◆◆◆◆◆◆ ─────────────────────── HIGH 8420 ╮
-│ ⢐⠁       ⡰⠉⠉ ⠈⠑⠢⡀⢸ ⠄ ⠘⠠⠤⠂ ⠐   ⢹⡀                                                   │
-│ ⡂       ⡰⠁⢀⡄⡀   ⠱⡈⡖⡐         ⡰⠁⢂   ⠐                             ⢀          ⡔⠒⠒⠉⠉⢆ │
-│⢐        ⠱⡀⠥⠄⢇⢪+20⠁⠑⠢⡂      ⡠⠊  ⢐                     ⢀⣀⠤⠤⠤⠤⠤⡀       ⠁      ⡜ ⡠⡀   ⢣│
-│⣗         ⠱⢄⣀⡔⢅⣨⠝⠓⠣⡀ ⠈⠑⠒⠢⠤⠤⠊    ⢐         ⢀        ⣀⠔⠊⢁⢀⢀    ⠱⡀            ⡜ ⠈⠤⠌⠰⣉⠂ │
-│⠚⡀         ⢰⠁⠈⡁⣀⡐⠈⡀⠑⡄           ⢐                ⡠⠊  ⡅⢑⠑⠄⢑    ⠱⡀          ⠈⢆      ⣀⠤│
-│ ⢂         ⠈⡆⢀⢐⣄⠔⠪⠇ ⡺⡀          ⡂              ⠠⡊  ⢀⠔⠂⠮⠪⠠⠊     ⠱⡀          ⠈⠦⣀⣀ ⡠⠊  │
-│ ⠐⡀        ⢠⠷⡊⠁⠘⢄  ⢀⠔⠁         ⡐                ⠈⠢⡀⠐⢄⠄⠃      ⠈ ⡔⠁              ⠉    │
-│  ⠐⠄⠁     ⢠⠃⡄⠪⡶⣄⠬⢦⠒⠁          ⠔          ⣀⠤⣀      ⠈⢢         ⢠⠊                   ⢀ │
-│   ⠈⠄⡀    ⡎ ⠂⠒⠉⠁  ⠱⡀        ⡀⠜        ⣀⡠⠼⠤⠤⠬⠦⢄⡀     ⠑⢄      ⢨⠃                      │
-│     ⠐⠠⡀ ⠘⢄      ⢀⠎⠄      ⡠⠐         ⠘⢧⣠⡀   ⣀⣄⠼      ⠐⠣⡀⢀⣀⡠⠤⠃                    ⢀⡠⡔│
-│        ⠁⠢⢀⠉⠢⠤⠔⠒⠒⠁    ⢀⠠⠂⠁              ⠙⠫⢍⠝⠊          ⠈⠁                     ⣠⡔⠊⠁⡜ │
-│           ⠈⠈⠐⠐⠐⠐⠐⠐⠐⠈⠈                                                        ⢠⠝⢧⡜  │
-│            ⠁                                                               ⡀⠈⠁ ⠈   │
-│                                                                           ⠂      ⠠ │
-│        ⠁               ⢀                                              ⠠ ⠈          │
-│            ⢀⢀⠠⠠⠠⠠⠠⢀⢀⢀⡀                          ⠈                      ⠁           │
-│        ⡀⠔⠈⠈        ⡔⠉⠈⠙⠕⡒⠒⠤⠤⣀                             ⡀                        │
-│     ⢀⠐⠁           ⡎   ⢀  ⠑⢀  ⠉⢲                                                    │
-│   ⢀⠄⠁             ⡇⢀⠄⠒⢄ ⡀⢄ ⠁⢄ ⢸        ⡀                                           │
-│  ⢀⠂         ⣀⡀   ⢠⠃⠨⡀⣐⡸⠑⢇⠜⠁  ⢂⢸                                                    │
-╰─ ARCADE ───── ↑↓←→ move  SPACE fire  X warp  M model  P pause  Q quit ── WARP ▰▰▰▰ ╯
+╭─ SCORE 3310 ─ ▲ ▲ ▲ ──────────────────── WAVE 3  ◆◆◆◆◆ ─────────────────────────────── HIGH 8420 ╮
+│⠁⠁⠉⠈⠈⠂⠢⢀              ⠈⢢  ⢀⡠⠔⠁                                                    ⣀⠔⢑⠉⠈⢑   ⢀⢀⠜⡎⠈⠁⠁│
+│        ⠑⠠⡀             ⠣⠒⠁                          ⠠                          ⢀⠎  ⠈⢢⠲⢚ ⢀⠐⠁  ⢇   │
+│          ⠈⢄               ⠁                                         ⠂         ⢀⠎  ⡠⠐⠢⡑⠈⠔⠁   ⢀⡸   │
+│⣀⣀          ⠢                                       ⡀                          ⠘⡄  ⢅⢀⣀⠌⡊     ⣠⠃   │
+│⠤⠲⠚⡵⡢⡀      ⠈⡂     ⡀                                                            ⠸⡀    ⠨  ⣀⠤⠒⠉ ⢀⠔⢢⡽│
+│+20 ⠈⠹⡄ ⠄    ⠨                                                                   ⠉⠒⠒⠤⠤⡓⠊⠉    ⢀⠌⠈⢸⢔│
+│+50⡵⡄ ⢹⡀     ⢘                               ⢠⠤⠤⢄                                     ⠅      ⢘⢀⢠⢏⠞│
+│⡙⣚⠵⣓⠵⢀⡮      ⠰                      ⠠     ⢀⠤⠔⠓⠒⠒⠚⠢⠤⡀                    ⠁             ⡃      ⢨⠔ ⠻⣦│
+│⠝⠒⠛⠒⢒⠕⠁     ⢀⠅                        ⠂   ⠘⠤⠦⣀⣀⣀⣀⢴⠤⠊                                  ⠰    ⠠ ⠁⠱⡐ ⠈│
+│⢄⡠⠠⠔⠁       ⠔                                ⠈⠑⠔⠊⠁                                  ⠁  ⢃ ⡀⠈    ⠈⠂⠤│
+│          ⡠⠊                                                                           ⢀⠥⡀        │
+│⠠       ⡠⠰                                                                          ⢀⡠⡖⠁ ⠈⠐⢄      │
+│  ⣀⢀⠠⠄⠊⠈                                       ⡀                                 ⣠⡔⡊⠃⡜      ⠈⠂⠤⢀⡀⡀│
+│⠁⠁                      ⢀                                                       ⢀⣀⠿⢣⡜             │
+│                     ⣀⠔⠒⠒⠤⠤⠤⣀⡀                                                ⢀⠠⠂⠁ ⠈              │
+│                  ⢂⠤⠊  ⡔⢐⢒⠈⠢ ⠈⠑⠢⡀                                            ⡀⠲                  ⡀│
+│                  ⠘⡄   ⢆⢈⠼⢀⠴⡁   ⠈⠢⡀                ⠈                       ⣠ ⠄                    │
+│         ⠠         ⢣      ⠡⣀⠌    ⡠⠊                                       ⠠                       │
+│                   ⠈⠢⡀         ⢀⠔⠁       ⢀                               ⠂     ⠂        ⣀⣀⣀⣀⣀     │
+│                     ⠑⢄      ⢀⠔⠁                                                    ⢀⠔⠊⠉    ⠈⡆    │
+╰─ ARCADE AUTO-FIRE ─── ↑↓←→ move  YUBN diagonal  F auto-fire  X warp  M model  Q quit ─ WARP ▰▰▰▰ ╯
 ```
 
 ## Run
@@ -52,6 +52,7 @@ fallback.
 | `Y` `U` `B` `N` | one-key diagonals: up-left, up-right, down-left, down-right |
 | `7` `9` `1` `3` | the same four diagonals, on the keypad |
 | `Space` | fire — also launches from the title screen |
+| `F` | auto-fire on/off (on by default) |
 | `X` | hyperspace: jump somewhere else, 3s cooldown |
 | `M` | switch flight model |
 | `P` | pause |
@@ -60,11 +61,13 @@ fallback.
 
 ## Two flight models
 
-**ARCADE** (default) — press a direction and the ship accelerates that way,
-with the nose swinging smoothly to face your input on a damped spring, and it
-glides to a stop when you let go. Firing never interrupts your flying. For diagonals, either
-hold two arrows or use a single diagonal key (`Y U B N`) — see the input note
-at the bottom for why one key is the more reliable of the two.
+**ARCADE** (default) — press a direction and the ship goes that way; let go and
+it stops within about 0.2 s, drifting roughly an eighth of the screen. The nose
+swings to face your input on a damped spring. Auto-fire is on by default, so the
+keyboard is yours for steering and you never have to hold two keys at once —
+the thing terminals handle worst. For diagonals, either hold two arrows or use a
+single diagonal key (`Y U B N`) — see the input note at the bottom for why one
+key is the more reliable of the two.
 
 **CLASSIC** — the 1979 model. `←→` rotate, `↑` thrusts along the nose, `↓` is a
 weak retro burn, and there are no brakes: momentum is yours to manage.
@@ -177,5 +180,14 @@ input layer has to work around:
   direction cancels a carried direction immediately.
 
 A single held key repeats reliably forever, which is why `Y U B N` give a
-perfect, indefinitely sustained diagonal where two arrows can only
-approximate one.
+perfect, indefinitely sustained diagonal where two arrows can only approximate
+one. Auto-fire exists for the same reason: with the gun running itself there is
+no second key to hold, so steering stays exact.
+
+Carry is deliberately asymmetric. A *direction* press carries the other
+directions for only 0.40 s, because a ship that keeps flying after you let go
+is the most infuriating thing there is; a fire or warp press carries them for
+1.0 s, since pressing those says nothing about whether you meant to change
+course. The first-press window is not a fixed guess either — the repeat delay
+is a user setting, so the game watches for the first repeat of a held key and
+learns it, clamped to 0.34–1.15 s.

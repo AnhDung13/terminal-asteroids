@@ -265,27 +265,34 @@ class Field:
             self.dot(cx + rx * math.cos(a), cy + ry * math.sin(a), attr, prio)
 
     def text(self, x, y, s, attr=0):
-        """Place text at a pixel position, snapped to the character grid."""
-        cx = int(x) % self.w // PX + self.cx0
-        cy = int(y) % self.h // PY + self.cy0
-        self.s.text(cx - len(s) // 2, cy, s, attr)
+        """Place text at a pixel position, snapped to the character grid.
+
+        Clamped rather than wrapped: a score pop split across both edges of
+        the screen reads as garbage.
+        """
+        cols = self.w // PX
+        cx = int(x) % self.w // PX - len(s) // 2
+        cx = max(0, min(cols - len(s), cx))
+        cy = int(y) % self.h // PY
+        self.s.text(cx + self.cx0, cy + self.cy0, s, attr)
 
 
 # ==========================================================================
 # Entities  (all positions and speeds are in pixels / pixels-per-second)
 # ==========================================================================
 class Ship:
-    RADIUS = 3.6
+    RADIUS = 3.0           # forgiving: well inside the drawn hull
     TURN = 4.0             # classic: rad/s
     TURN_RESP = 16.0       # classic: how fast rotation spins up and down
     TURN_STIFF = 600.0     # arcade: nose spring toward the heading you press
     TURN_DAMP = 49.0       # ~2*sqrt(TURN_STIFF): critically damped, no wobble
     TURN_MAX = 14.0
     ACC_CLASSIC = 135.0
-    ACC_ARCADE = 320.0
+    ACC_ARCADE = 540.0     # = MAX_ARCADE * DRAG_ARCADE, to reach top speed
     DRAG_CLASSIC = 0.5
-    DRAG_ARCADE = 2.2      # glide a little, so diagonals hold their line
-    MAX_SPEED = 105.0
+    DRAG_ARCADE = 6.0      # stops within ~0.2s of letting go
+    MAX_ARCADE = 90.0      # tuned by sweep: best evasion *and* best precision
+    MAX_SPEED = 105.0      # classic keeps the faster, driftier ceiling
     IN_ATTACK = 24.0       # how fast the smoothed stick follows a press...
     IN_RELEASE = 10.0      # ...and how gently it lets go
 
@@ -331,7 +338,7 @@ class Ship:
         else:
             self.thrust = max(0.0, self.thrust - dt * 5)
             self._steer(dt, None)
-        self._integrate(dt, self.DRAG_ARCADE, world)
+        self._integrate(dt, self.DRAG_ARCADE, world, self.MAX_ARCADE)
 
     # -- classic: rotate, then burn ---------------------------------------
     def fly_classic(self, dt, turn, fwd, back, world):
@@ -350,16 +357,16 @@ class Ship:
             self.thrust = min(1.0, self.thrust + dt * 8)
         else:
             self.thrust = max(0.0, self.thrust - dt * 4)
-        self._integrate(dt, self.DRAG_CLASSIC, world)
+        self._integrate(dt, self.DRAG_CLASSIC, world, self.MAX_SPEED)
 
-    def _integrate(self, dt, drag, world):
+    def _integrate(self, dt, drag, world, cap):
         damp = math.exp(-drag * dt)
         self.vx *= damp
         self.vy *= damp
         sp = math.hypot(self.vx, self.vy)
-        if sp > self.MAX_SPEED:
+        if sp > cap:
             # Ease down to the limit instead of clipping hard against it.
-            k = 1.0 - (1.0 - self.MAX_SPEED / sp) * min(1.0, 8.0 * dt)
+            k = 1.0 - (1.0 - cap / sp) * min(1.0, 8.0 * dt)
             self.vx *= k
             self.vy *= k
         self.x = (self.x + self.vx * dt) % world[0]
@@ -643,10 +650,13 @@ class Game:
     def __init__(self, w, h, mode="arcade"):
         self.screen = Screen(w, h)
         self.mode = mode
+        self.autofire = True
         self.layout(w, h)
-        self.high, saved_mode = self.load_state()
+        self.high, saved_mode, saved_auto = self.load_state()
         if saved_mode in ("arcade", "classic"):
             self.mode = saved_mode
+        if saved_auto in ("auto", "manual"):
+            self.autofire = saved_auto == "auto"
         self.state = "title"
         self.msg = ""
         self.msg_t = self.msg_t0 = 0.0
@@ -723,14 +733,17 @@ class Game:
         try:
             with open(STATE_FILE) as fh:
                 parts = fh.read().split()
-            return int(parts[0]), (parts[1] if len(parts) > 1 else "")
+            return (int(parts[0]),
+                    parts[1] if len(parts) > 1 else "",
+                    parts[2] if len(parts) > 2 else "")
         except Exception:
-            return 0, ""
+            return 0, "", ""
 
     def save_state(self):
         try:
             with open(STATE_FILE, "w") as fh:
-                fh.write("%d %s\n" % (self.high, self.mode))
+                fh.write("%d %s %s\n" % (self.high, self.mode,
+                                          "auto" if self.autofire else "manual"))
         except Exception:
             pass
 
@@ -848,6 +861,11 @@ class Game:
         self.shocks.append(Shock(s.x, s.y, 3, 24, 0.4))
         self.burst(s.x, s.y, 14, 70, 0.45)
 
+    def toggle_autofire(self):
+        self.autofire = not self.autofire
+        self.flash("AUTO-FIRE %s" % ("ON" if self.autofire else "OFF"), 1.2)
+        self.save_state()
+
     def toggle_mode(self):
         self.mode = "classic" if self.mode == "arcade" else "arcade"
         self.flash("%s FLIGHT" % self.mode.upper(), 1.2)
@@ -931,6 +949,10 @@ class Game:
                     s.vx * -0.25 + random.uniform(-14, 14),
                     s.vy * -0.25 + random.uniform(-14, 14),
                     random.uniform(0.15, 0.35), 0.93))
+            if self.autofire:
+                # The gun runs itself, so the keyboard is yours for steering
+                # and you never have to hold two keys the OS won't repeat.
+                self.fire()
 
         for a in self.asteroids:
             a.update(dt, self.world)
@@ -1120,8 +1142,10 @@ class Game:
         if self.state == "over":
             self.draw_over(sc)
         elif self.state == "paused":
-            self.panel(sc, ["PAUSED", "", "P  resume       M  flight model",
-                            "R  restart      Q  quit"])
+            self.panel(sc, ["PAUSED", "",
+                            "P  resume            M  flight model",
+                            "F  auto-fire         R  restart",
+                            "Q  quit"])
         sc.blit(stdscr)
 
     # -- chrome -----------------------------------------------------------
@@ -1164,29 +1188,38 @@ class Game:
         if len(right) + 6 < w:
             sc.text(w - len(right) - 3, 0, " " + right + " ", A("ui"))
 
-        # bottom bar: flight model, controls, warp charge
+        # bottom bar: flight model, controls, warp charge - laid out left to
+        # right so the segments can never run into each other.
         y = self.sh - 1
         mode = "ARCADE" if self.mode == "arcade" else "CLASSIC"
         sc.text(2, y, " %s " % mode, A("warn"))
+        left = 2 + len(mode) + 2
+        if self.autofire and w > 92:
+            sc.text(left, y, "AUTO-FIRE ", A("ui_hi"))
+            left += 10
         s = self.ship
         charge = 1.0 if s is None else 1.0 - s.warp_cd / 3.0
         bars = max(0, min(4, int(charge * 4 + 0.001)))
         warp = "WARP " + BAR_FULL * bars + BAR_EMPTY * (4 - bars)
+        right = w - 2
         if len(warp) + 12 < w:
-            sc.text(w - len(warp) - 3, y, " " + warp + " ",
+            right = w - len(warp) - 3
+            sc.text(right, y, " " + warp + " ",
                     A("ui_hi") if bars == 4 else A("dim"))
         hints = [
-            ("↑↓←→ move  YUBN diagonal  SPACE fire  X warp  M model  Q quit"
+            ("↑↓←→ move  YUBN diagonal  F auto-fire  X warp  M model  Q quit"
              if self.mode == "arcade" else
-             "←→ turn  ↑ thrust  SPACE fire  X warp  M model  P pause  Q quit"),
-            ("↑↓←→ YUBN move  SPACE fire  X warp  Q quit"
+             "←→ turn  ↑ thrust  SPACE fire  F auto  X warp  M model  Q quit"),
+            ("↑↓←→ YUBN move  SPACE fire  F auto  X warp  Q quit"
              if self.mode == "arcade" else
              "←→ turn  ↑ thrust  SPACE fire  X warp  Q quit"),
             "MOVE · FIRE · WARP",
         ]
+        gap = right - left
         for hint in hints:
-            if len(hint) + 26 < w:
-                sc.text((w - len(hint)) // 2, y, " %s " % hint, A("dim"))
+            if len(hint) + 4 <= gap:
+                sc.text(left + (gap - len(hint)) // 2, y, " %s " % hint,
+                        A("dim"))
                 break
 
     def title_bars(self, sc):
@@ -1263,7 +1296,8 @@ class Game:
         rows = [
             (0, moves, A("ui_hi")),
             (1, "SPACE fire      X hyperspace      P pause", A("ui")),
-            (2, "M  flight model:  %s" % mode, A("warn")),
+            (2, "M  flight model: %s      F  auto-fire: %s"
+                % (mode, "ON" if self.autofire else "OFF"), A("warn")),
             (4, "rocks 20 / 50 / 100      saucer 200 / 1000", A("dim")),
         ]
         if self.high:
@@ -1326,15 +1360,23 @@ class Keys:
     real press, so releasing a key still stops you.
     """
 
-    FIRST = 0.62        # a fresh press: bridges the OS repeat delay
-    REPEAT = 0.26       # a repeat: bridges the gap between repeats
-    # Carry has to outlast the OS repeat delay: when you add a second arrow,
-    # its repeat train only starts ~0.5s later, and the first arrow has gone
-    # quiet by then. 1.25s bridges that gap, and bounds how long a direction
-    # can survive if you really did let go.
-    CARRY = 1.25        # how long another key may keep a direction alive
-    CARRY_HI = 0.70     # carried push right after the last real press...
-    CARRY_LO = 0.20     # ...fading to this as the carry window runs out
+    # A fresh press has to stay "held" until the OS repeat train starts, or
+    # the ship stutters; but every millisecond past that is drift after a tap.
+    # The delay is a user setting (~0.25-1.0s on macOS), so rather than guess
+    # it, watch for the first repeat of a held key and learn it.
+    DELAY_GUESS = 0.50  # until the first repeat is seen
+    FIRST_MIN = 0.34
+    FIRST_MAX = 1.15
+    REPEAT = 0.16       # bridges the gap between repeats (~25-30/s)
+    # Every millisecond of carry is also thrust you did not ask for, if you
+    # really did let go. So it is short while you are steering - a ship that
+    # keeps flying after you release is the most infuriating thing there is -
+    # and longer after a fire or warp press, which says nothing about whether
+    # you meant to change direction.
+    CARRY = 0.40        # another direction key carries the others this long
+    CARRY_OTHER = 1.0   # a fire/warp/pause press carries them this long
+    CARRY_HI = 0.50     # carried push right after the last real press...
+    CARRY_LO = 0.10     # ...fading to this as the carry window runs out
     DIRS = ("left", "right", "up", "down")
     OPPOSITE = {"left": "right", "right": "left", "up": "down", "down": "up"}
 
@@ -1342,7 +1384,12 @@ class Keys:
         self.real = dict.fromkeys(self.DIRS, -9.0)    # last genuine press
         self.hold = dict.fromkeys(self.DIRS, -9.0)    # genuine hold expiry
         self.carried = dict.fromkeys(self.DIRS, -9.0)  # carried hold expiry
+        self.delay = self.DELAY_GUESS                 # learned repeat delay
         self.now = 0.0
+
+    @property
+    def first(self):
+        return min(self.FIRST_MAX, max(self.FIRST_MIN, self.delay * 1.12))
 
     def tick(self, now):
         self.now = now
@@ -1350,17 +1397,26 @@ class Keys:
     def press(self, names, now):
         for name in names:
             fresh = now >= self.hold[name]
-            self.hold[name] = now + (self.FIRST if fresh else self.REPEAT)
+            if not fresh:
+                # A repeat. If it arrived long after the press it is the
+                # *first* repeat, which measures this machine's repeat delay.
+                gap = now - self.real[name]
+                if 0.12 < gap < self.FIRST_MAX:
+                    self.delay = max(gap, self.delay * 0.9)
+            self.hold[name] = now + (self.first if fresh else self.REPEAT)
             self.real[name] = now
             opp = self.OPPOSITE[name]
             if opp not in names:                       # reversing cancels
                 self.real[opp] = self.hold[opp] = self.carried[opp] = -9.0
-        self.other(now, skip=names)
+        self._carry(now, self.CARRY, skip=names)
 
     def other(self, now, skip=()):
         """Any key event at all keeps recently-pressed directions alive."""
+        self._carry(now, self.CARRY_OTHER, skip=skip)
+
+    def _carry(self, now, window, skip=()):
         for name in self.DIRS:
-            if name not in skip and now - self.real[name] < self.CARRY:
+            if name not in skip and now - self.real[name] < window:
                 self.carried[name] = max(self.carried[name], now + self.REPEAT)
 
     def axis(self, name):
@@ -1374,7 +1430,7 @@ class Keys:
         if now < self.hold[name]:
             return 1.0
         if now < self.carried[name]:
-            t = min(1.0, max(0.0, (now - self.real[name]) / self.CARRY))
+            t = min(1.0, max(0.0, (now - self.real[name]) / self.CARRY_OTHER))
             return self.CARRY_HI + (self.CARRY_LO - self.CARRY_HI) * t
         return 0.0
 
@@ -1435,6 +1491,8 @@ def run(stdscr):
                     game.state = "play"
             elif c in (ord("m"), ord("M")):
                 game.toggle_mode()
+            elif c in (ord("f"), ord("F")):
+                game.toggle_autofire()
             elif c in (ord("x"), ord("X")):
                 if game.state == "play":
                     game.hyperspace()
