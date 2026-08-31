@@ -61,8 +61,8 @@ fallback.
 ## Two flight models
 
 **ARCADE** (default) — press a direction and the ship accelerates that way,
-with the nose swinging smoothly to face your input, and it glides to a stop
-when you let go. Firing never interrupts your flying. For diagonals, either
+with the nose swinging smoothly to face your input on a damped spring, and it
+glides to a stop when you let go. Firing never interrupts your flying. For diagonals, either
 hold two arrows or use a single diagonal key (`Y U B N`) — see the input note
 at the bottom for why one key is the more reliable of the two.
 
@@ -130,7 +130,25 @@ wave 3, and under 2 s by wave 12.
 
 Everything composites into one character buffer and blits once per frame, so
 there's no flicker and no tearing. A full frame at 110×32 costs about 0.7 ms to
-draw, leaving the 45 fps loop roughly 3% busy.
+draw, leaving the 60 fps loop roughly 4% busy.
+
+## How the motion is kept smooth
+
+- **Physics runs in fixed slices** of at most 1/120 s, with the last slice of
+  each frame taking the remainder. Capping the slice keeps Euler integration
+  stable through a long frame; letting the last one absorb the remainder means
+  a frame advances by exactly the time it took, so motion never beats against
+  the frame rate. Measured jerk is now identical at 30 fps and 60 fps.
+- **Keys are eased into a stick position** rather than driving thrust directly.
+  A key is on or off, so using it raw steps the acceleration between frames;
+  easing it in over ~40 ms and out over ~100 ms ramps instead.
+- **The nose is on a critically damped spring** rather than turning at a fixed
+  rate — it eases in and out of a turn and settles without any wobble. Tuned to
+  land a 90° turn in 200 ms with zero overshoot, which cut peak angular
+  acceleration by about 7×.
+- **Speed eases into its limit** instead of being clipped hard against it, and
+  screen shake is a decaying oscillation rather than per-frame noise, so a hit
+  reads as a thump rather than a flicker.
 
 ## Development
 

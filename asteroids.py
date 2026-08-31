@@ -26,7 +26,7 @@ from itertools import groupby
 
 TAU = math.tau
 MIN_W, MIN_H = 48, 16
-FPS = 45.0
+FPS = 60.0
 
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           ".asteroids_state")
@@ -277,40 +277,68 @@ class Field:
 class Ship:
     RADIUS = 3.6
     TURN = 4.0             # classic: rad/s
+    TURN_RESP = 16.0       # classic: how fast rotation spins up and down
+    TURN_STIFF = 600.0     # arcade: nose spring toward the heading you press
+    TURN_DAMP = 49.0       # ~2*sqrt(TURN_STIFF): critically damped, no wobble
+    TURN_MAX = 14.0
     ACC_CLASSIC = 135.0
     ACC_ARCADE = 320.0
     DRAG_CLASSIC = 0.5
     DRAG_ARCADE = 2.2      # glide a little, so diagonals hold their line
-    SNAP = 13.0            # arcade: rad/s the nose swings toward your input
     MAX_SPEED = 105.0
+    IN_ATTACK = 24.0       # how fast the smoothed stick follows a press...
+    IN_RELEASE = 10.0      # ...and how gently it lets go
 
     def __init__(self, x, y):
         self.x, self.y = x, y
         self.vx = self.vy = 0.0
         self.ang = -TAU / 4          # nose up (pixel y grows downward)
+        self.omega = 0.0             # angular velocity, rad/s
+        self.ix = self.iy = 0.0      # smoothed stick position
         self.thrust = 0.0            # 0..1 visual throttle
         self.invuln = 2.2
         self.warp_cd = 0.0
 
+    def _ease(self, cur, target, dt):
+        """Slew a raw 0/1 key state toward its target - fast on, gentle off."""
+        rate = self.IN_ATTACK if abs(target) > abs(cur) else self.IN_RELEASE
+        return cur + (target - cur) * min(1.0, rate * dt)
+
+    def _steer(self, dt, want):
+        """Critically damped spring on the nose: eases in and out, no wobble."""
+        if want is None:
+            self.omega -= self.omega * min(1.0, self.TURN_DAMP * dt)
+        else:
+            d = (want - self.ang + math.pi) % TAU - math.pi
+            self.omega += (d * self.TURN_STIFF -
+                           self.omega * self.TURN_DAMP) * dt
+        self.omega = max(-self.TURN_MAX, min(self.TURN_MAX, self.omega))
+        self.ang += self.omega * dt
+
     # -- arcade: an input vector pushes the ship, nose follows the push ----
     def fly_arcade(self, dt, ix, iy, world):
-        if ix or iy:
-            n = math.hypot(ix, iy)
+        # Keys are on/off, so ease them into a smoothed stick position first:
+        # thrust then ramps in and out instead of stepping between frames.
+        self.ix = self._ease(self.ix, ix, dt)
+        self.iy = self._ease(self.iy, iy, dt)
+        n = math.hypot(self.ix, self.iy)
+        if n > 0.02:
             k = (1.0 / n) if n > 1.0 else 1.0    # clamp, don't normalise:
-            self.vx += self.ACC_ARCADE * ix * k * dt   # a carried key pushes
-            self.vy += self.ACC_ARCADE * iy * k * dt   # at partial strength
+            self.vx += self.ACC_ARCADE * self.ix * k * dt  # a carried key
+            self.vy += self.ACC_ARCADE * self.iy * k * dt  # pushes partially
             self.thrust = min(1.0, self.thrust + dt * 8)
-            want = math.atan2(iy, ix)
-            d = (want - self.ang + math.pi) % TAU - math.pi
-            self.ang += max(-self.SNAP * dt, min(self.SNAP * dt, d))
+            self._steer(dt, math.atan2(self.iy, self.ix))
         else:
             self.thrust = max(0.0, self.thrust - dt * 5)
+            self._steer(dt, None)
         self._integrate(dt, self.DRAG_ARCADE, world)
 
     # -- classic: rotate, then burn ---------------------------------------
     def fly_classic(self, dt, turn, fwd, back, world):
-        if turn:
-            self.ang -= turn * self.TURN * dt
+        # Rotation spins up and coasts down rather than snapping on and off.
+        target = -turn * self.TURN
+        self.omega += (target - self.omega) * min(1.0, self.TURN_RESP * dt)
+        self.ang += self.omega * dt
         acc = 0.0
         if fwd:
             acc = self.ACC_CLASSIC
@@ -330,7 +358,8 @@ class Ship:
         self.vy *= damp
         sp = math.hypot(self.vx, self.vy)
         if sp > self.MAX_SPEED:
-            k = self.MAX_SPEED / sp
+            # Ease down to the limit instead of clipping hard against it.
+            k = 1.0 - (1.0 - self.MAX_SPEED / sp) * min(1.0, 8.0 * dt)
             self.vx *= k
             self.vy *= k
         self.x = (self.x + self.vx * dt) % world[0]
@@ -825,6 +854,23 @@ class Game:
         self.save_state()
 
     # -- update -----------------------------------------------------------
+    STEP = 1.0 / 120.0     # longest slice the integrator may take
+    MAX_FRAME = 0.06       # ignore anything longer (a stall, a resize)
+
+    def advance(self, dt, keys):
+        """Step the simulation in slices of at most STEP, totalling exactly dt.
+
+        Capping the slice keeps Euler integration stable when a frame runs
+        long. Letting the last slice take the remainder - rather than banking
+        it for next frame - means each frame advances by exactly the time it
+        took, so motion never beats against the frame rate.
+        """
+        dt = min(dt, self.MAX_FRAME)
+        while dt > 1e-6:
+            step = min(self.STEP, dt)
+            self.update(step, keys)
+            dt -= step
+
     def update(self, dt, keys):
         self.msg_t = max(0.0, self.msg_t - dt)
         self.shake = max(0.0, self.shake - dt)
@@ -1036,8 +1082,11 @@ class Game:
         sc.clear()
         cx, cy = self.cell_x, self.cell_y
         if self.shake > 0:
-            cx += random.choice((-1, 0, 0, 1))
-            cy += random.choice((-1, 0, 0, 1))
+            # A decaying oscillation, not per-frame noise: reads as a thump
+            # rather than a flicker.
+            amp = min(2.0, self.shake * 7.0)
+            cx += int(round(amp * math.sin(self.shake * 47.0)))
+            cy += int(round(amp * 0.55 * math.sin(self.shake * 39.0 + 1.7)))
         f = Field(sc, cx, cy, *self.world)
 
         for st in self.stars:
@@ -1399,7 +1448,7 @@ def run(stdscr):
                     game.fire()
 
         keys.tick(now)
-        game.update(dt, keys)
+        game.advance(dt, keys)
         game.draw(stdscr)
         stdscr.noutrefresh()
         curses.doupdate()
@@ -1429,7 +1478,7 @@ def selftest(frames=1500):
                 keys.press(names, t)
         if i % 8 == 0:
             keys.other(t)
-        g.update(1 / FPS, keys)
+        g.advance(1 / FPS, keys)
         if i % 8 == 0:
             g.fire()
         if i % 300 == 299:
