@@ -294,8 +294,8 @@ class Ship:
     DRAG_CLASSIC = 0.5
     MAX_SPEED = 105.0      # classic keeps the faster, driftier ceiling
     # Arcade is direct control, not thrust: the keys command a velocity and
-    # the ship takes ARCADE_RESP seconds to match it. Press and you go, let
-    # go and you stop - no momentum to fight.
+    # the ship takes ARCADE_RESP seconds to match it. Hold and you go, let go
+    # and you stop - no momentum to fight, and nothing to cancel afterwards.
     ARCADE_SPEED = 95.0
     ARCADE_RESP = 0.075
     IN_ATTACK = 24.0       # how fast the smoothed stick follows a press...
@@ -668,6 +668,7 @@ class Game:
         self.msg_t = self.msg_t0 = 0.0
         self.timer = 0.0
         self.shake = 0.0
+        self.gun = False
         self.sweep = 0.0
         self.demo_fire = 0.0
         self.reset(full=True)
@@ -931,10 +932,16 @@ class Game:
             return
 
         # ---- playing ----
+        self.gun = getattr(keys, "gun", False)
+        if self.gun:
+            self.fire()          # rate-limited by fire_cd, so this is safe
         s = self.ship
         if s:
             if self.mode == "arcade":
-                s.fly_arcade(dt, keys.hx, keys.hy, self.world)
+                s.fly_arcade(dt,
+                             keys.axis("right") - keys.axis("left"),
+                             keys.axis("down") - keys.axis("up"),
+                             self.world)
             else:
                 turn = keys.axis("left") - keys.axis("right")
                 s.fly_classic(dt, turn, keys.held("up"), keys.held("down"),
@@ -1184,6 +1191,11 @@ class Game:
         mode = "ARCADE" if self.mode == "arcade" else "CLASSIC"
         sc.text(2, y, " %s " % mode, A("warn"))
         left = 2 + len(mode) + 2
+        gun = "GUN " + ("●" if self.gun else "○")
+        if left + len(gun) + 2 < self.sw - 26:
+            sc.text(left, y, " %s " % gun,
+                    A("ui_hi") if self.gun else A("dim"))
+            left += len(gun) + 2
         s = self.ship
         charge = 1.0 if s is None else 1.0 - s.warp_cd / 3.0
         bars = max(0, min(4, int(charge * 4 + 0.001)))
@@ -1194,14 +1206,14 @@ class Game:
             sc.text(right, y, " " + warp + " ",
                     A("ui_hi") if bars == 4 else A("dim"))
         hints = [
-            ("↑↓←→ set course  YUBN diagonal  0 stop  SPACE fire  X warp"
-             "  M model  Q quit"
+            ("↑↓←→ hold to fly  YUBN diagonal  SPACE gun  X warp"
+             "  M model  P pause  Q quit"
              if self.mode == "arcade" else
-             "←→ turn  ↑ thrust  SPACE fire  X warp  M model  P pause  Q quit"),
-            ("↑↓←→ course  0 stop  SPACE fire  X warp  M model  Q quit"
+             "←→ turn  ↑ thrust  SPACE gun  X warp  M model  P pause  Q quit"),
+            ("↑↓←→ fly  YUBN diagonal  SPACE gun  X warp  M model  Q quit"
              if self.mode == "arcade" else
-             "←→ turn  ↑ thrust  SPACE fire  X warp  Q quit"),
-            "MOVE · FIRE · WARP",
+             "←→ turn  ↑ thrust  SPACE gun  X warp  Q quit"),
+            "MOVE · GUN · WARP",
         ]
         gap = right - left
         for hint in hints:
@@ -1278,13 +1290,16 @@ class Game:
             sc.ctext(y + i, s, ramp("title", i / max(1, len(lines) - 1) * 0.8))
         y += len(lines) + 1
         mode = "ARCADE" if self.mode == "arcade" else "CLASSIC"
-        moves = ("↑ ↓ ← →  set course      Y U B N  diagonals      0  stop"
+        moves = ("↑ ↓ ← →  fly      Y U B N  diagonals      0  all stop"
                  if self.mode == "arcade"
                  else "← → turn      ↑ thrust      ↓ retro")
         rows = [
             (0, moves, A("ui_hi")),
-            (1, "one press steers - no need to hold a key down", A("dim")),
-            (2, "SPACE fire      X hyperspace      P pause", A("ui")),
+            (1, ("hold a key to fly - let go and the ship stops"
+                 if self.mode == "arcade"
+                 else "hold to turn and thrust - there are no brakes"),
+             A("dim")),
+            (2, "SPACE  gun on / off      X hyperspace      P pause", A("ui")),
             (3, "M  flight model:  %s" % mode, A("warn")),
             (5, "rocks 20 / 50 / 100      saucer 200 / 1000", A("dim")),
         ]
@@ -1354,8 +1369,16 @@ class Keys:
     # it, watch for the first repeat of a held key and learn it.
     DELAY_GUESS = 0.50  # until the first repeat is seen
     FIRST_MIN = 0.34
-    FIRST_MAX = 1.15
-    REPEAT = 0.16       # bridges the gap between repeats (~25-30/s)
+    # High enough to cover a slow terminal's delay-until-repeat once that
+    # delay has been measured. It only ever costs drift on a machine that
+    # actually is that slow, since first tracks the measured delay.
+    FIRST_MAX = 1.35
+    # Bridges the gap between repeats. Every millisecond of it is drift after
+    # you let go, so rather than sit on a worst-case guess it is measured from
+    # the repeat train itself, the same way the delay above is.
+    REPEAT = 0.16       # until a train has been seen
+    REPEAT_MIN = 0.07
+    REPEAT_MAX = 0.28
     # Every millisecond of carry is also thrust you did not ask for, if you
     # really did let go. So it is short while you are steering - a ship that
     # keeps flying after you release is the most infuriating thing there is -
@@ -1365,40 +1388,57 @@ class Keys:
     CARRY_OTHER = 1.0   # a fire/warp/pause press carries them this long
     CARRY_HI = 0.50     # carried push right after the last real press...
     CARRY_LO = 0.10     # ...fading to this as the carry window runs out
+    # SPACE presses closer together than this are the OS repeat train, not a
+    # second deliberate tap, so they must not toggle the gun back off.
+    GUN_TAP = 0.30
     DIRS = ("left", "right", "up", "down")
     OPPOSITE = {"left": "right", "right": "left", "up": "down", "down": "up"}
 
     def __init__(self):
-        self.hx = self.hy = 0.0                       # sticky course (arcade)
         self.real = dict.fromkeys(self.DIRS, -9.0)    # last genuine press
         self.hold = dict.fromkeys(self.DIRS, -9.0)    # genuine hold expiry
         self.carried = dict.fromkeys(self.DIRS, -9.0)  # carried hold expiry
         self.delay = self.DELAY_GUESS                 # learned repeat delay
+        self.gap = self.REPEAT / 2.6                  # learned repeat period
         self.now = 0.0
+        self.gun = False                              # latched auto-fire
+        self.gun_t = -9.0
 
     @property
     def first(self):
         return min(self.FIRST_MAX, max(self.FIRST_MIN, self.delay * 1.12))
 
+    @property
+    def window(self):
+        """How long one repeat keeps a key alive - and so how long the ship
+        keeps going after you let go. Kept at a few repeat periods so a slow
+        train still bridges, and no wider."""
+        return min(self.REPEAT_MAX, max(self.REPEAT_MIN, self.gap * 2.6))
+
     def tick(self, now):
         self.now = now
 
-    def course(self, names):
-        """Arcade steering: the last direction pressed is where you go.
-
-        No timers, no repeat, no release: one press sets a course and the ship
-        holds it until you press another direction or the brake. A key-repeat
-        train just re-affirms the same course, so it does not matter whether
-        the terminal repeats fast, slowly, or not at all.
-        """
-        self.hx = float(("right" in names) - ("left" in names))
-        self.hy = float(("down" in names) - ("up" in names))
-
     def brake(self):
-        self.hx = self.hy = 0.0
+        """All stop: forget every direction, held or carried."""
+        for name in self.DIRS:
+            self.real[name] = self.hold[name] = self.carried[name] = -9.0
+
+    def press_fire(self, now):
+        """SPACE latches the gun rather than firing one shot per event.
+
+        Terminals only repeat the most recently pressed key, so a held SPACE
+        falls silent the instant you touch an arrow - you cannot fly and shoot
+        at the same time as long as fire depends on the repeat train. So the
+        gun latches instead: tap to arm it, tap again to stop, and steering
+        never interrupts the stream. Repeats from a held
+        SPACE arrive far too fast to be a second deliberate tap, so they only
+        ever re-affirm the latch.
+        """
+        self.gun = True if now - self.gun_t <= self.GUN_TAP else not self.gun
+        self.gun_t = now
+        return self.gun
 
     def press(self, names, now):
-        self.course(names)
         for name in names:
             fresh = now >= self.hold[name]
             # A press this soon after the last one is a repeat, whether or not
@@ -1409,7 +1449,9 @@ class Keys:
             gap = now - self.real[name]
             if 0.12 < gap < self.FIRST_MAX * 1.2:
                 self.delay = max(gap, self.delay * 0.85)
-            self.hold[name] = now + (self.first if fresh else self.REPEAT)
+            if 0.0 < gap < 0.30:            # inside a train: that is a period
+                self.gap = max(gap, self.gap * 0.88)
+            self.hold[name] = now + (self.first if fresh else self.window)
             self.real[name] = now
             opp = self.OPPOSITE[name]
             if opp not in names:                       # reversing cancels
@@ -1423,7 +1465,8 @@ class Keys:
     def _carry(self, now, window, skip=()):
         for name in self.DIRS:
             if name not in skip and now - self.real[name] < window:
-                self.carried[name] = max(self.carried[name], now + self.REPEAT)
+                self.carried[name] = max(self.carried[name],
+                                         now + self.window)
 
     def axis(self, name):
         """0.0 not held, 1.0 genuinely held, tapering in between if carried.
@@ -1509,12 +1552,19 @@ def run(stdscr):
             elif c in (ord(" "), curses.KEY_ENTER, 10, 13):
                 if game.state in ("title", "over"):
                     game.start_game()
-                elif game.state == "play":
-                    game.fire()
+                    keys.gun = True        # launch already armed
+                    keys.gun_t = now
+                elif game.state in ("play", "dead", "paused"):
+                    # Arming while paused or between lives is fine; actually
+                    # loosing a round into a stopped game is not.
+                    if keys.press_fire(now) and game.state == "play":
+                        game.fire()
 
         if game.state != prev_state:
             if game.state != "play":
                 keys.brake()          # a new ship starts stationary
+            if game.state in ("title", "over"):
+                keys.gun = False      # but the gun stays latched across lives
             prev_state = game.state
         keys.tick(now)
         game.advance(dt, keys)
@@ -1545,8 +1595,13 @@ def selftest(frames=1500):
                             (3, ("left",)), (4, ("down",))):
             if (i // 23) % 5 == code:
                 keys.press(names, t)
+        if i % 97 == 0:                 # two arrows in a row -> a diagonal
+            keys.press(("up",), t)
+            keys.press(("right",), t + 0.01)
         if i % 8 == 0:
             keys.other(t)
+        if i in (60, 900):
+            keys.press_fire(t)          # latch the gun on, then back off
         g.advance(1 / FPS, keys)
         if i % 8 == 0:
             g.fire()

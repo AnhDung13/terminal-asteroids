@@ -31,7 +31,7 @@ sub-character instead of jumping from cell to cell.
 │      ⢀           ⢸      ⠇⣀⠕    ⢑⠄                                                                │
 │                   ⢣          ⢀⠔⠁                                           ⠄                     │
 │                    ⠣⡀      ⣀⠔⠁       ⠈                                            ⡠⠤⠔⠒⠒⠒⠒⢲       │
-╰─ ARCADE ─────────── ↑↓←→ course  0 stop  SPACE fire  X warp  M model  Q quit ───────── WARP ▰▰▰▰ ╯
+╰─ ARCADE ─ GUN ● ─── ↑↓←→ fly  YUBN diagonal  SPACE gun  X warp  M model  Q quit ────── WARP ▰▰▰▰ ╯
 ```
 
 ## Run
@@ -48,11 +48,11 @@ fallback.
 
 | Key | Action |
 | --- | --- |
-| `↑ ↓ ← →` / `WASD` | set course (arcade) · turn, thrust, retro-burn (classic) |
+| `↑ ↓ ← →` / `WASD` | hold to fly (arcade) · turn, thrust, retro-burn (classic) |
 | `Y` `U` `B` `N` | one-key diagonals: up-left, up-right, down-left, down-right |
 | `7` `9` `1` `3` | the same four diagonals, on the keypad |
-| `Space` | fire — also launches from the title screen |
-| `0` `.` `,` `5` | stop (arcade) |
+| `Space` | gun on/off — also launches from the title screen, already armed |
+| `0` `.` `,` `5` | all stop |
 | `X` | hyperspace: jump somewhere else, 3s cooldown |
 | `M` | switch flight model |
 | `P` | pause |
@@ -61,22 +61,37 @@ fallback.
 
 ## Two flight models
 
-**ARCADE** (default) — **you do not hold keys down.** One press sets a course
-and the ship holds it until you press another direction or press `0` to stop.
-`Y U B N` set the four diagonals. The nose follows your course on a damped
-spring, and the ship reaches or leaves its cruise speed in 75 ms, so it starts
-and stops with the key instead of sliding around.
+**ARCADE** (default) — **hold a key to fly, let go and the ship stops.** The
+keys command a velocity rather than a thrust, and the ship reaches or leaves
+its cruise speed in 75 ms, so it starts and stops with the key instead of
+sliding around. Pressing the opposite arrow reverses immediately. `Y U B N`
+give a diagonal in one key, which is the reliable way to hold one — two arrows
+at once only ever half-works, for the reason in the note at the end.
 
-This exists because holding a key is the one thing terminals genuinely cannot
-do — see the note at the end. Against a bot steering at a human-ish 5–10
-presses per second, sticky course survives 3–4× longer than the old
-hold-to-move model.
+Letting go is the one thing a terminal never actually tells you about, so the
+release is inferred: a key stays live for a short window that each repeat
+re-opens, and the ship stops once the repeats stop arriving. Both halves of
+that window are measured from your own keyboard rather than guessed — see the
+note at the end.
 
 **CLASSIC** — the 1979 model. `←→` rotate, `↑` thrusts along the nose, `↓` is a
 weak retro burn, and there are no brakes: momentum is yours to manage.
 
 Press `M` any time to swap. Your choice and your high score persist in
 `.asteroids_state` next to the script.
+
+## The gun
+
+`Space` does not fire one shot — it **latches the gun on**, and it stays on
+while you fly, through a lost ship and into the next wave, until you press
+`Space` again. The lamp in the bottom bar reads `GUN ●` when it is running and
+`GUN ○` when it is not, and launching from the title screen already arms it.
+
+This is the same trick sticky course plays, for the same reason. A terminal
+auto-repeats only the *most recently pressed* key, so a held `Space` falls
+silent the instant you touch an arrow — under a fire-per-keypress gun you
+genuinely could not fly and shoot at once, and every course correction cut the
+stream until you released and pressed again. A latch has nothing to interrupt.
 
 ## Scoring
 
@@ -170,30 +185,36 @@ writes its save file to a temp path, so your high score is left alone.
 
 Terminals report key presses but never key releases, and the OS auto-repeats
 only the *most recently pressed* key. Worse, the delay before that repeat train
-starts is a user setting — and for some setups arrows do not repeat at all. Any
-scheme that treats a press as "held until a timer runs out" therefore stutters:
-the ship flies for a moment, stops, and starts again when the repeats arrive.
+starts is a user setting — and for some setups arrows do not repeat at all.
 
-**Arcade sidesteps all of it.** One press sets a course, so there is nothing to
-hold and no window to expire. A repeat train just re-affirms the course you
-already set, which means it stops mattering whether the terminal repeats
-quickly, slowly, or not at all. Holding the Right arrow for six seconds, the
-share of that time the ship is actually moving:
+So a release has to be inferred, and the whole flight model comes down to two
+numbers: how long a *fresh* press stays live (it has to outlast the delay
+before repeats start, or the ship stutters) and how long each *repeat* keeps it
+alive after that (which is exactly how long the ship overruns when you do let
+go). Guessing either one badly ruins the model in one direction or the other,
+so both are **measured from your own keyboard**: the first repeat of a held key
+gives the delay, the ones after it give the period, and the two windows are
+sized from those. Holding the Right arrow, then releasing it:
 
-| terminal / OS key-repeat | hold model | sticky course |
+| terminal / OS key-repeat | share of the hold spent flying | overrun after release |
 | --- | --- | --- |
-| fast repeat (0.25 s, 30/s) | 99% | 100% |
-| macOS default (0.5 s, 25/s) | 99% | 100% |
-| slow repeat (1.2 s, 10/s) | 99% | 100% |
-| very slow (2.0 s, 6/s) | 88% | 100% |
-| repeat disabled — one press | **22%** | **100%** |
+| fast repeat (0.25 s, 30/s) | 100% | 0.32 s |
+| macOS default (0.5 s, 25/s) | 100% | 0.30 s |
+| slow repeat (1.2 s, 10/s) | 100% | 0.50 s |
+| very slow (2.0 s, 6/s) | 97% | 0.35 s |
+| repeat disabled — one press | one 0.8 s dash, then a stop | — |
 
-That last row is the stutter: with repeat off, the old model flew for half a
-second and stopped no matter how long you held the key.
+That last row is the honest limit. With auto-repeat switched off there is no
+information at all after the initial press, so a held arrow reads as a single
+dash. Nothing can fix that from inside a terminal; turn key repeat back on.
 
-Classic mode still uses the hold model, since rotate-and-thrust has no sensible
-sticky form. There a press opens a window long enough to cover the repeat
-delay, any other key event keeps recently pressed directions alive at tapering
-strength, and the delay itself is learned from the first repeat of a held key
-rather than guessed. `Y U B N` remain the reliable way to hold a diagonal,
+Two arrows held at once is the other casualty, since only the newer of them
+repeats: the older one is kept alive at tapering strength for a fraction of a
+second and then fades. `Y U B N` are the reliable way to hold a diagonal,
 because a single held key is the one thing that does repeat predictably.
+
+**The gun sidesteps all of it by latching.** The arrow you press to dodge is
+*always* more recent than the `Space` you are holding, so a gun that fires once
+per keypress goes silent every single time you steer — you cannot fly and shoot
+at once. A latch has no window to expire and nothing to interrupt: `Space` arms
+it, `Space` disarms it, and steering never touches it.
