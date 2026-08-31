@@ -28,8 +28,11 @@ TAU = math.tau
 MIN_W, MIN_H = 48, 16
 FPS = 60.0
 
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          ".asteroids_state")
+# Overridable so tests never clobber a real player's save file.
+STATE_FILE = os.environ.get(
+    "ASTEROIDS_STATE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 ".asteroids_state"))
 
 # ==========================================================================
 # Colour
@@ -288,11 +291,13 @@ class Ship:
     TURN_DAMP = 49.0       # ~2*sqrt(TURN_STIFF): critically damped, no wobble
     TURN_MAX = 14.0
     ACC_CLASSIC = 135.0
-    ACC_ARCADE = 540.0     # = MAX_ARCADE * DRAG_ARCADE, to reach top speed
     DRAG_CLASSIC = 0.5
-    DRAG_ARCADE = 6.0      # stops within ~0.2s of letting go
-    MAX_ARCADE = 90.0      # tuned by sweep: best evasion *and* best precision
     MAX_SPEED = 105.0      # classic keeps the faster, driftier ceiling
+    # Arcade is direct control, not thrust: the keys command a velocity and
+    # the ship takes ARCADE_RESP seconds to match it. Press and you go, let
+    # go and you stop - no momentum to fight.
+    ARCADE_SPEED = 95.0
+    ARCADE_RESP = 0.075
     IN_ATTACK = 24.0       # how fast the smoothed stick follows a press...
     IN_RELEASE = 10.0      # ...and how gently it lets go
 
@@ -324,21 +329,25 @@ class Ship:
 
     # -- arcade: an input vector pushes the ship, nose follows the push ----
     def fly_arcade(self, dt, ix, iy, world):
-        # Keys are on/off, so ease them into a smoothed stick position first:
-        # thrust then ramps in and out instead of stepping between frames.
-        self.ix = self._ease(self.ix, ix, dt)
-        self.iy = self._ease(self.iy, iy, dt)
-        n = math.hypot(self.ix, self.iy)
+        n = math.hypot(ix, iy)
+        if n > 1.0:                              # clamp, don't normalise: a
+            ix, iy = ix / n, iy / n              # carried key still counts
+        # Slew straight to the commanded velocity. The only lag is one short
+        # time constant, so the ship starts and stops with the key.
+        k = 1.0 - math.exp(-dt / self.ARCADE_RESP)
+        self.vx += (ix * self.ARCADE_SPEED - self.vx) * k
+        self.vy += (iy * self.ARCADE_SPEED - self.vy) * k
         if n > 0.02:
-            k = (1.0 / n) if n > 1.0 else 1.0    # clamp, don't normalise:
-            self.vx += self.ACC_ARCADE * self.ix * k * dt  # a carried key
-            self.vy += self.ACC_ARCADE * self.iy * k * dt  # pushes partially
             self.thrust = min(1.0, self.thrust + dt * 8)
-            self._steer(dt, math.atan2(self.iy, self.ix))
+            self._steer(dt, math.atan2(iy, ix))
         else:
             self.thrust = max(0.0, self.thrust - dt * 5)
             self._steer(dt, None)
-        self._integrate(dt, self.DRAG_ARCADE, world, self.MAX_ARCADE)
+        self.x = (self.x + self.vx * dt) % world[0]
+        self.y = (self.y + self.vy * dt) % world[1]
+        self.ang %= TAU
+        self.invuln = max(0.0, self.invuln - dt)
+        self.warp_cd = max(0.0, self.warp_cd - dt)
 
     # -- classic: rotate, then burn ---------------------------------------
     def fly_classic(self, dt, turn, fwd, back, world):
@@ -650,13 +659,10 @@ class Game:
     def __init__(self, w, h, mode="arcade"):
         self.screen = Screen(w, h)
         self.mode = mode
-        self.autofire = True
         self.layout(w, h)
-        self.high, saved_mode, saved_auto = self.load_state()
+        self.high, saved_mode = self.load_state()
         if saved_mode in ("arcade", "classic"):
             self.mode = saved_mode
-        if saved_auto in ("auto", "manual"):
-            self.autofire = saved_auto == "auto"
         self.state = "title"
         self.msg = ""
         self.msg_t = self.msg_t0 = 0.0
@@ -733,17 +739,14 @@ class Game:
         try:
             with open(STATE_FILE) as fh:
                 parts = fh.read().split()
-            return (int(parts[0]),
-                    parts[1] if len(parts) > 1 else "",
-                    parts[2] if len(parts) > 2 else "")
+            return int(parts[0]), (parts[1] if len(parts) > 1 else "")
         except Exception:
-            return 0, "", ""
+            return 0, ""
 
     def save_state(self):
         try:
             with open(STATE_FILE, "w") as fh:
-                fh.write("%d %s %s\n" % (self.high, self.mode,
-                                          "auto" if self.autofire else "manual"))
+                fh.write("%d %s\n" % (self.high, self.mode))
         except Exception:
             pass
 
@@ -861,11 +864,6 @@ class Game:
         self.shocks.append(Shock(s.x, s.y, 3, 24, 0.4))
         self.burst(s.x, s.y, 14, 70, 0.45)
 
-    def toggle_autofire(self):
-        self.autofire = not self.autofire
-        self.flash("AUTO-FIRE %s" % ("ON" if self.autofire else "OFF"), 1.2)
-        self.save_state()
-
     def toggle_mode(self):
         self.mode = "classic" if self.mode == "arcade" else "arcade"
         self.flash("%s FLIGHT" % self.mode.upper(), 1.2)
@@ -949,11 +947,6 @@ class Game:
                     s.vx * -0.25 + random.uniform(-14, 14),
                     s.vy * -0.25 + random.uniform(-14, 14),
                     random.uniform(0.15, 0.35), 0.93))
-            if self.autofire:
-                # The gun runs itself, so the keyboard is yours for steering
-                # and you never have to hold two keys the OS won't repeat.
-                self.fire()
-
         for a in self.asteroids:
             a.update(dt, self.world)
         for b in self.bullets:
@@ -1142,10 +1135,8 @@ class Game:
         if self.state == "over":
             self.draw_over(sc)
         elif self.state == "paused":
-            self.panel(sc, ["PAUSED", "",
-                            "P  resume            M  flight model",
-                            "F  auto-fire         R  restart",
-                            "Q  quit"])
+            self.panel(sc, ["PAUSED", "", "P  resume       M  flight model",
+                            "R  restart      Q  quit"])
         sc.blit(stdscr)
 
     # -- chrome -----------------------------------------------------------
@@ -1194,9 +1185,6 @@ class Game:
         mode = "ARCADE" if self.mode == "arcade" else "CLASSIC"
         sc.text(2, y, " %s " % mode, A("warn"))
         left = 2 + len(mode) + 2
-        if self.autofire and w > 92:
-            sc.text(left, y, "AUTO-FIRE ", A("ui_hi"))
-            left += 10
         s = self.ship
         charge = 1.0 if s is None else 1.0 - s.warp_cd / 3.0
         bars = max(0, min(4, int(charge * 4 + 0.001)))
@@ -1207,10 +1195,10 @@ class Game:
             sc.text(right, y, " " + warp + " ",
                     A("ui_hi") if bars == 4 else A("dim"))
         hints = [
-            ("↑↓←→ move  YUBN diagonal  F auto-fire  X warp  M model  Q quit"
+            ("↑↓←→ move  YUBN diagonal  SPACE fire  X warp  M model  Q quit"
              if self.mode == "arcade" else
-             "←→ turn  ↑ thrust  SPACE fire  F auto  X warp  M model  Q quit"),
-            ("↑↓←→ YUBN move  SPACE fire  F auto  X warp  Q quit"
+             "←→ turn  ↑ thrust  SPACE fire  X warp  M model  P pause  Q quit"),
+            ("↑↓←→ YUBN move  SPACE fire  X warp  Q quit"
              if self.mode == "arcade" else
              "←→ turn  ↑ thrust  SPACE fire  X warp  Q quit"),
             "MOVE · FIRE · WARP",
@@ -1296,8 +1284,7 @@ class Game:
         rows = [
             (0, moves, A("ui_hi")),
             (1, "SPACE fire      X hyperspace      P pause", A("ui")),
-            (2, "M  flight model: %s      F  auto-fire: %s"
-                % (mode, "ON" if self.autofire else "OFF"), A("warn")),
+            (2, "M  flight model:  %s" % mode, A("warn")),
             (4, "rocks 20 / 50 / 100      saucer 200 / 1000", A("dim")),
         ]
         if self.high:
@@ -1397,12 +1384,14 @@ class Keys:
     def press(self, names, now):
         for name in names:
             fresh = now >= self.hold[name]
-            if not fresh:
-                # A repeat. If it arrived long after the press it is the
-                # *first* repeat, which measures this machine's repeat delay.
-                gap = now - self.real[name]
-                if 0.12 < gap < self.FIRST_MAX:
-                    self.delay = max(gap, self.delay * 0.9)
+            # A press this soon after the last one is a repeat, whether or not
+            # our hold window was still open - and the first repeat of a hold
+            # measures this machine's delay-until-repeat. Learning it even
+            # after the window lapsed is what stops a too-short guess from
+            # making a held key stutter forever.
+            gap = now - self.real[name]
+            if 0.12 < gap < self.FIRST_MAX * 1.2:
+                self.delay = max(gap, self.delay * 0.85)
             self.hold[name] = now + (self.first if fresh else self.REPEAT)
             self.real[name] = now
             opp = self.OPPOSITE[name]
@@ -1491,8 +1480,6 @@ def run(stdscr):
                     game.state = "play"
             elif c in (ord("m"), ord("M")):
                 game.toggle_mode()
-            elif c in (ord("f"), ord("F")):
-                game.toggle_autofire()
             elif c in (ord("x"), ord("X")):
                 if game.state == "play":
                     game.hyperspace()
