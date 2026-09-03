@@ -2,6 +2,10 @@
 """
 ASTEROIDS - a terminal space shooter with braille-pixel graphics.
 
+You fly one ship against a hostile fleet: interceptors and gunships every
+wave, a Marauder every fifth, a Dreadnought every tenth. Wrecks drop special
+magazines. The rocks are still out there, but they are weather now.
+
 Rendering: every character cell carries a 2x4 grid of Unicode braille dots,
 so the play field is a real pixel buffer - 8 dots per cell, and because cells
 are about twice as tall as they are wide, those dots come out square. Circles
@@ -90,8 +94,11 @@ def init_colors():
         PAL["ast2"] = _mk(180)
         PAL["ast1"] = _mk(210)
         PAL["flash"] = _mk(231, True)
-        PAL["ufo"] = _mk(84, True)
-        PAL["ufoshot"] = _mk(120)
+        PAL["foe1"] = _mk(84, True)      # interceptor
+        PAL["foe2"] = _mk(215, True)     # gunship
+        PAL["foe3"] = _mk(207, True)     # marauder - mini boss
+        PAL["foe4"] = _mk(203, True)     # dreadnought - boss
+        PAL["foeshot"] = _mk(120)
         PAL["ui"] = _mk(45)
         PAL["ui_hi"] = _mk(87, True)
         PAL["accent"] = _mk(213, True)
@@ -117,8 +124,11 @@ def init_colors():
         PAL["ast2"] = _mk(Y)
         PAL["ast1"] = _mk(M, True)
         PAL["flash"] = _mk(W, True)
-        PAL["ufo"] = _mk(G, True)
-        PAL["ufoshot"] = _mk(G)
+        PAL["foe1"] = _mk(G, True)
+        PAL["foe2"] = _mk(Y, True)
+        PAL["foe3"] = _mk(M, True)
+        PAL["foe4"] = _mk(R, True)
+        PAL["foeshot"] = _mk(G)
         PAL["ui"] = _mk(C)
         PAL["ui_hi"] = _mk(C, True)
         PAL["accent"] = _mk(M, True)
@@ -283,6 +293,44 @@ class Field:
 # ==========================================================================
 # Entities  (all positions and speeds are in pixels / pixels-per-second)
 # ==========================================================================
+# Every hull in the game - yours and theirs - is a list of polylines in local
+# coordinates: nose along +x, one unit = the ship's radius. One rotate-and-
+# scale draws any of them at any size, so a silhouette is designed as a shape
+# rather than written as drawing code.
+def flip(poly):
+    return [(px, -py) for px, py in poly]
+
+
+def draw_hull(f, x, y, ang, r, parts, attr, prio=4):
+    ca, sa = math.cos(ang) * r, math.sin(ang) * r
+    for poly in parts:
+        px, py = poly[0]
+        ax, ay = x + px * ca - py * sa, y + px * sa + py * ca
+        for px, py in poly[1:]:
+            bx, by = x + px * ca - py * sa, y + px * sa + py * ca
+            f.line(ax, ay, bx, by, attr, prio)
+            ax, ay = bx, by
+
+
+# Your ship: one unbroken chevron - a raked nose, kinked shoulders, wings
+# swept back to a deep tail notch. Deliberately unlike anything in the fleet,
+# because in a crowded field you must never have to wonder which one is you.
+#
+# It is one outline and a spine, and that is the whole point. A braille cell
+# is 2x4 dots, so at the size a fighter actually gets drawn there is only room
+# for a silhouette; the nacelles and canopy frames that read beautifully on a
+# capital ship just fill in solid on this one. Capital ships get the detail
+# because they are three times the size.
+PLAYER = [
+    [(1.34, 0.0), (0.10, -0.40), (-0.58, -0.84), (-0.34, -0.30),
+     (-0.66, 0.0), (-0.34, 0.30), (-0.58, 0.84), (0.10, 0.40), (1.34, 0.0)],
+]
+PLAYER_TRIM = [
+    [(0.52, 0.0), (0.02, 0.0)],                                   # spine
+]
+PLAYER_ENG = [(-0.58, 0.0), (-0.44, -0.34), (-0.44, 0.34)]
+
+
 class Ship:
     RADIUS = 3.0           # forgiving: well inside the drawn hull
     TURN = 4.0             # classic: rad/s
@@ -337,6 +385,10 @@ class Ship:
         k = 1.0 - math.exp(-dt / self.ARCADE_RESP)
         self.vx += (ix * self.ARCADE_SPEED - self.vx) * k
         self.vy += (iy * self.ARCADE_SPEED - self.vy) * k
+        # The gun fires itself, but it does not aim itself: the nose follows
+        # the way you are flying, so where you point the ship is where the
+        # rounds go. Stop, and the nose holds its last heading and keeps
+        # firing along it.
         if n > 0.02:
             self.thrust = min(1.0, self.thrust + dt * 8)
             self._steer(dt, math.atan2(iy, ix))
@@ -392,26 +444,29 @@ class Ship:
                     self.y + d * math.sin(a + off))
         return p(0, 7.5), p(2.5, 5.6), p(-2.5, 5.6), p(math.pi, 2.4)
 
+    DRAW_R = 10.0          # drawn size; RADIUS above stays the hit radius
+
     def draw(self, f):
         if self.invuln > 0 and int(self.invuln * 9) % 2 == 0:
             return
-        nose, left, right, tail = self.hull()
-        att = A("ship")
-        f.line(*nose, *left, att, 6)
-        f.line(*nose, *right, att, 6)
-        f.line(*left, *tail, A("ship_dim"), 6)
-        f.line(*right, *tail, A("ship_dim"), 6)
-        if self.thrust > 0.05:
-            back = self.ang + math.pi
-            length = (3.5 + 4.0 * self.thrust) * random.uniform(0.75, 1.1)
-            root = (self.x + 2.6 * math.cos(back), self.y + 2.6 * math.sin(back))
-            for k in (-1, 0, 1):
-                a = back + 0.30 * k * random.uniform(0.5, 1.1)
-                d = length * (1.0 if k == 0 else 0.55)
-                f.line(root[0], root[1],
-                       self.x + d * math.cos(a), self.y + d * math.sin(a),
-                       ramp("fire", random.uniform(0.0, 0.4) + 0.22 * abs(k)),
-                       5)
+        r = self.DRAW_R
+        draw_hull(f, self.x, self.y, self.ang, r, PLAYER, A("ship"), 6)
+        draw_hull(f, self.x, self.y, self.ang, r, PLAYER_TRIM,
+                  A("ship_dim"), 6)
+        if self.thrust <= 0.05:
+            return
+        # A plume off each nozzle, the middle one longest, all of them
+        # flickering and growing with the throttle.
+        ca, sa = math.cos(self.ang) * r, math.sin(self.ang) * r
+        bx, by = -math.cos(self.ang), -math.sin(self.ang)
+        for i, (px, py) in enumerate(PLAYER_ENG):
+            ex = self.x + px * ca - py * sa
+            ey = self.y + px * sa + py * ca
+            ln = (3.0 + 5.0 * self.thrust) * random.uniform(0.7, 1.15)
+            if i:
+                ln *= 0.6
+            f.line(ex, ey, ex + bx * ln, ey + by * ln,
+                   ramp("fire", random.uniform(0.0, 0.35) + 0.2 * bool(i)), 5)
 
 
 class Asteroid:
@@ -459,10 +514,17 @@ class Asteroid:
 
 
 class Bullet:
-    def __init__(self, x, y, vx, vy, life, hostile=False):
+    def __init__(self, x, y, vx, vy, life, hostile=False, dmg=1, kind=None,
+                 col=None):
         self.x, self.y, self.vx, self.vy = x, y, vx, vy
         self.life = life
         self.hostile = hostile
+        self.dmg = dmg
+        self.kind = kind
+        self.col = col
+        # A lance keeps going through a hull, so it has to remember what it
+        # has already gone through or it would chew one ship to pieces.
+        self.spent = set() if kind == "pierce" else None
 
     SPEED = 190.0
 
@@ -484,15 +546,74 @@ class Bullet:
             self.life = 0.0
 
     def draw(self, f):
-        att = A("ufoshot") if self.hostile else A("bullet")
+        att = A(self.col) if self.col else (A("foeshot") if self.hostile
+                                            else A("bullet"))
         # A tracer streak from where it was to where it is - a lone dot moving
         # four pixels a frame is nearly impossible to follow.
         step = 0.016
         f.line(self.x - self.vx * step, self.y - self.vy * step,
                self.x, self.y, att, 5)
+        if self.dmg > 1:            # a gauss slug reads as a heavier bolt
+            f.line(self.x - self.vx * step * 2.2,
+                   self.y - self.vy * step * 2.2,
+                   self.x - self.vx * step, self.y - self.vy * step, att, 5)
         for i in (2, 3, 4):
             f.dot(self.x - self.vx * step * i, self.y - self.vy * step * i,
-                  att if self.hostile else ramp("fire", 0.2 + 0.2 * i), 4)
+                  att if (self.hostile or self.col)
+                  else ramp("fire", 0.2 + 0.2 * i), 4)
+
+
+# Salvaged from a wrecked hull: a magazine of something better than the
+# ship's own gun. One at a time, and it runs out.
+WEAPONS = {
+    "spread": dict(tag="S", name="SPREAD", col="foe2", ammo=55, cd=0.17,
+                   note="a fan of three"),
+    "rapid": dict(tag="R", name="RAPID", col="foe1", ammo=150, cd=0.052,
+                  note="three times the cadence"),
+    "pierce": dict(tag="P", name="LANCE", col="ui_hi", ammo=60, cd=0.14,
+                   note="passes through hulls"),
+    "homing": dict(tag="H", name="SEEKER", col="foe3", ammo=55, cd=0.20,
+                   note="curves onto its target"),
+    "gauss": dict(tag="G", name="GAUSS", col="foe4", ammo=26, cd=0.30,
+                  note="three hull points a slug"),
+}
+WEAPON_KINDS = ("spread", "rapid", "pierce", "homing", "gauss")
+
+
+class Pickup:
+    """A dropped magazine, tumbling where its ship came apart."""
+
+    R = 7.0
+    LIFE = 15.0
+
+    def __init__(self, x, y, kind):
+        self.x, self.y, self.kind = x, y, kind
+        a = random.uniform(0, TAU)
+        sp = random.uniform(8.0, 22.0)
+        self.vx, self.vy = sp * math.cos(a), sp * math.sin(a)
+        self.life = self.LIFE
+        self.t = random.uniform(0, TAU)
+
+    def update(self, dt, world):
+        self.x = (self.x + self.vx * dt) % world[0]
+        self.y = (self.y + self.vy * dt) % world[1]
+        k = 0.985 ** (dt * 60)
+        self.vx *= k
+        self.vy *= k
+        self.t += dt
+        self.life -= dt
+
+    def draw(self, f):
+        if self.life < 4.0 and int(self.life * 7) % 2 == 0:
+            return
+        spec = WEAPONS[self.kind]
+        att = A(spec["col"])
+        r = self.R * (1.0 + 0.10 * math.sin(self.t * 4.0))
+        pts = [(self.x + r * math.cos(self.t * 1.5 + i * TAU / 6),
+                self.y + r * math.sin(self.t * 1.5 + i * TAU / 6))
+               for i in range(6)]
+        f.poly(pts, att, 5)
+        f.text(self.x, self.y, spec["tag"], att)
 
 
 class Particle:
@@ -597,56 +718,201 @@ class Star:
               ramp("star", 0.25 + 0.7 * self.depth - 0.22 * tw), 0)
 
 
-class Ufo:
-    FIRST_WAVE = 2          # no saucers at all on wave 1
-    HUNTER_WAVE = 4         # the small one that aims at you comes later still
+# --------------------------------------------------------------------------
+# Hostile ships.
+#
+# Every hull is a list of polylines in local coordinates - nose along +x, one
+# unit = the ship's radius - so a single rotate-and-scale draws any of them at
+# any size, and a silhouette can be designed as a shape rather than as code.
+# --------------------------------------------------------------------------
+# Interceptor: a lean dart with closed swept strakes and a tail notch.
+_SC_W = [(0.24, -0.19), (-0.32, -0.90), (-0.72, -0.66), (-0.44, -0.15),
+         (0.24, -0.19)]
+SCOUT = [
+    [(1.22, 0.0), (0.32, -0.25), (-0.66, -0.17), (-0.56, 0.0),
+     (-0.66, 0.17), (0.32, 0.25), (1.22, 0.0)],
+    _SC_W, flip(_SC_W),
+]
+SCOUT_ENG = [(-0.60, -0.11), (-0.60, 0.11)]
 
-    def __init__(self, world, level, diff):
-        self.diff = diff
-        self.small = (level >= self.HUNTER_WAVE and
-                      random.random() < 0.20 + 0.40 * diff)
-        self.r = 6.0 if self.small else 9.0
-        self.value = 1000 if self.small else 200
-        self.y = random.uniform(world[1] * 0.15, world[1] * 0.85)
-        right = random.random() < 0.5
-        speed = 24.0 + 18.0 * diff
-        self.x = 1.0 if right else world[0] - 2.0
-        self.vx = (speed if right else -speed) * (1.35 if self.small else 1.0)
+# Gunship: broad shoulders, two stubby outboard nacelles on short pylons.
+_GS_N = [(0.30, -0.88), (-0.50, -0.88), (-0.64, -0.62), (0.16, -0.62),
+         (0.30, -0.88)]
+_GS_S = [(0.14, -0.32), (0.22, -0.66)]
+GUNSHIP = [
+    [(1.12, 0.0), (0.48, -0.30), (-0.58, -0.38), (-0.84, -0.16),
+     (-0.84, 0.16), (-0.58, 0.38), (0.48, 0.30), (1.12, 0.0)],
+    _GS_N, flip(_GS_N), _GS_S, flip(_GS_S),
+    [(0.64, -0.12), (0.28, -0.12), (0.28, 0.12), (0.64, 0.12)],
+]
+GUNSHIP_ENG = [(-0.82, -0.10), (-0.82, 0.10), (-0.62, -0.75), (-0.62, 0.75)]
+
+# Marauder: the mini-boss - a raked prow and heavy delta wings.
+_MR_W = [(0.34, -0.32), (0.06, -1.08), (-0.68, -1.24), (-0.98, -0.72),
+         (-0.62, -0.36)]
+_MR_P = [(-0.16, -0.80), (0.06, -0.80)]
+MARAUDER = [
+    [(1.30, 0.0), (0.78, -0.20), (0.36, -0.36), (-0.72, -0.42),
+     (-1.02, -0.22), (-1.02, 0.22), (-0.72, 0.42), (0.36, 0.36),
+     (0.78, 0.20), (1.30, 0.0)],
+    _MR_W, flip(_MR_W), _MR_P, flip(_MR_P),
+    [(0.64, 0.0), (-0.34, 0.0)],
+    [(0.12, -0.36), (0.12, 0.36)],
+    [(-0.46, -0.36), (-0.46, 0.36)],
+]
+MARAUDER_ENG = [(-1.00, -0.13), (-1.00, 0.13), (-0.94, -0.92), (-0.94, 0.92)]
+
+# Dreadnought: the wave-ten capital ship. Spinal gun, flanking pods.
+_DR_W = [(0.48, -0.42), (0.22, -1.18), (-0.56, -1.38), (-1.06, -1.06),
+         (-1.12, -0.56), (-0.76, -0.46)]
+_DR_P = [(-0.32, -1.02), (0.02, -1.02), (0.08, -0.80), (-0.36, -0.80),
+         (-0.32, -1.02)]
+DREADNOUGHT = [
+    [(1.50, 0.0), (1.02, -0.22), (0.56, -0.46), (-0.62, -0.54),
+     (-1.18, -0.32), (-1.28, 0.0), (-1.18, 0.32), (-0.62, 0.54),
+     (0.56, 0.46), (1.02, 0.22), (1.50, 0.0)],
+    _DR_W, flip(_DR_W), _DR_P, flip(_DR_P),
+    [(0.90, 0.0), (-0.58, 0.0)],
+    [(0.32, -0.48), (0.32, 0.48)],
+    [(-0.26, -0.52), (-0.26, 0.52)],
+    [(-0.82, -0.42), (-0.82, 0.42)],
+]
+DREADNOUGHT_ENG = [(-1.26, -0.16), (-1.26, 0.16), (-1.08, -0.90),
+                   (-1.08, 0.90)]
+
+
+class Raider:
+    """A hostile ship: four classes, one flight brain, four silhouettes.
+
+    They fly to a standoff distance and circle it rather than drifting across
+    the screen, so the fight happens around you instead of past you.
+    """
+
+    SPECS = {
+        "scout": dict(r=8.5, hp=1, speed=64.0, cd=1.9, shots=1, jitter=0.26,
+                      bsp=78.0, value=150, shape=SCOUT, eng=SCOUT_ENG,
+                      keep=46.0, col="foe1", turn=5.0),
+        "gunship": dict(r=12.0, hp=2, speed=46.0, cd=1.7, shots=2, jitter=0.16,
+                        bsp=88.0, value=400, shape=GUNSHIP, eng=GUNSHIP_ENG,
+                        keep=86.0, col="foe2", turn=3.4),
+        "marauder": dict(r=15.0, hp=11, speed=32.0, cd=1.35, shots=4,
+                         jitter=0.13, bsp=80.0, value=2500, shape=MARAUDER,
+                         eng=MARAUDER_ENG, keep=104.0, col="foe3",
+                         turn=2.4),
+        "dread": dict(r=24.0, hp=28, speed=23.0, cd=1.15, shots=7, jitter=0.10,
+                      bsp=74.0, value=12000, shape=DREADNOUGHT,
+                      eng=DREADNOUGHT_ENG, keep=134.0, col="foe4",
+                      turn=1.7),
+    }
+    BOSSES = ("marauder", "dread")
+
+    def __init__(self, kind, x, y, diff, world=None):
+        s = self.SPECS[kind]
+        self.kind = kind
+        # A capital ship has to fit the field it is fighting in: at the 48x16
+        # minimum a full-size dreadnought would be most of the screen.
+        self.r = s["r"]
+        if world is not None:
+            self.r = min(self.r, world[0] * 0.115, world[1] * 0.20)
+        self.hp = self.hp0 = s["hp"]
+        self.speed = s["speed"] * (0.82 + 0.34 * diff)
+        self.cd0 = s["cd"] * (1.30 - 0.50 * diff)
+        self.shots = s["shots"]
+        self.jitter = s["jitter"] * (1.35 - 0.75 * diff)
+        self.bsp = s["bsp"] * (0.85 + 0.35 * diff)
+        self.value = s["value"]
+        self.shape = s["shape"]
+        self.eng = s["eng"]
+        self.keep = s["keep"]
+        self.col = s["col"]
+        self.turn = s["turn"]
+        self.boss = kind in self.BOSSES
+        self.x, self.y = x, y
+        self.vx = self.vy = 0.0
+        self.ang = random.uniform(0, TAU)
+        self.cd = self.cd0 * random.uniform(0.6, 1.4)
+        self.orbit = random.choice((-1.0, 1.0))
         self.t = random.uniform(0, TAU)
-        self.shoot_cd = 2.6 - 1.2 * diff
+        self.flash = 0.0
+        self.arrive = 0.7          # brief fade-in so they do not pop in
+
+    @staticmethod
+    def toward(x1, y1, x2, y2, world):
+        """Shortest vector to a point across a wrapping field."""
+        w, h = world
+        return ((x2 - x1 + w * 0.5) % w - w * 0.5,
+                (y2 - y1 + h * 0.5) % h - h * 0.5)
 
     def update(self, dt, world, ship, bullets):
         self.t += dt
-        self.x += self.vx * dt
-        self.y = (self.y + math.sin(self.t * 1.6) * 22.0 * dt) % world[1]
-        self.shoot_cd -= dt
-        if self.shoot_cd <= 0 and ship is not None:
-            self.shoot_cd = (2.4 - 1.45 * self.diff) * random.uniform(.85, 1.3)
-            if self.small:
-                jitter = 0.30 - 0.16 * self.diff
-                a = math.atan2(ship.y - self.y, ship.x - self.x)
-                a += random.uniform(-jitter, jitter)
-            else:
-                a = random.uniform(0, TAU)
-            sp = 60.0 + 45.0 * self.diff
-            bullets.append(Bullet(self.x, self.y, sp * math.cos(a),
-                                  sp * math.sin(a),
-                                  Bullet.reach(world, sp), hostile=True))
-        return -14 < self.x < world[0] + 14
+        self.flash = max(0.0, self.flash - dt)
+        self.arrive = max(0.0, self.arrive - dt)
+        if ship is not None:
+            dx, dy = self.toward(self.x, self.y, ship.x, ship.y, world)
+            d = math.hypot(dx, dy) or 1.0
+            ux, uy = dx / d, dy / d
+            # Close on the standoff ring, then circle it. Weaving keeps the
+            # orbit from reading as a perfect, lifeless circle.
+            radial = max(-1.0, min(1.0, (d - self.keep) / 46.0))
+            tang = self.orbit * (1.0 - abs(radial))
+            tang += 0.25 * math.sin(self.t * 1.7 + self.orbit)
+            wx, wy = ux * radial - uy * tang, uy * radial + ux * tang
+            n = math.hypot(wx, wy) or 1.0
+            wx, wy = wx / n, wy / n
+            want = math.atan2(dy, dx)
+        else:
+            wx, wy = math.cos(self.ang), math.sin(self.ang)
+            want, d = self.ang, 1e9
+        k = min(1.0, 2.4 * dt)
+        self.vx += (wx * self.speed - self.vx) * k
+        self.vy += (wy * self.speed - self.vy) * k
+        self.x = (self.x + self.vx * dt) % world[0]
+        self.y = (self.y + self.vy * dt) % world[1]
+        da = (want - self.ang + math.pi) % TAU - math.pi
+        self.ang = (self.ang + da * min(1.0, self.turn * dt)) % TAU
+
+        self.cd -= dt
+        if self.cd <= 0 and ship is not None and self.arrive <= 0:
+            self.cd = self.cd0 * random.uniform(0.85, 1.25)
+            self.volley(bullets, world, math.atan2(dy, dx))
+        return True
+
+    def volley(self, bullets, world, base):
+        n = self.shots
+        step = 0.17 if not self.boss else 0.15
+        muzzle = self.r * (1.05 if self.boss else 0.9)
+        for i in range(n):
+            a = base + (i - (n - 1) * 0.5) * step
+            a += random.uniform(-self.jitter, self.jitter)
+            bullets.append(Bullet(
+                (self.x + muzzle * math.cos(self.ang)) % world[0],
+                (self.y + muzzle * math.sin(self.ang)) % world[1],
+                self.bsp * math.cos(a), self.bsp * math.sin(a),
+                Bullet.reach(world, self.bsp), hostile=True))
+
+    def hit(self, dmg=1):
+        self.hp -= dmg
+        self.flash = 0.09
+        return self.hp <= 0
 
     def draw(self, f):
-        att = A("ufo")
-        r = self.r
-        x, y = self.x, self.y
-        # flattened hull, dome on top, tapered underside, running lights
-        f.ellipse(x, y, r, r * 0.34, att, 4)
-        f.arc(x, y - r * 0.28, r * 0.42, att, 4, step=0.9,
-              a0=math.pi * 1.05, a1=TAU * 0.975)
-        f.line(x - r * 0.5, y + r * 0.3, x, y + r * 0.62, att, 4)
-        f.line(x + r * 0.5, y + r * 0.3, x, y + r * 0.62, att, 4)
-        blink = ramp("fire", 0.1 if int(self.t * 6) % 2 else 0.65)
-        f.dot(x - r * 0.62, y + r * 0.12, blink, 4)
-        f.dot(x + r * 0.62, y + r * 0.12, blink, 4)
+        if self.arrive > 0 and int(self.arrive * 14) % 2 == 0:
+            return
+        att = A("flash") if self.flash > 0 else A(self.col)
+        draw_hull(f, self.x, self.y, self.ang, self.r, self.shape, att, 4)
+        # Engine bloom: a short flare trailing each nozzle, flickering.
+        ca, sa = math.cos(self.ang) * self.r, math.sin(self.ang) * self.r
+        bx, by = -math.cos(self.ang), -math.sin(self.ang)
+        for px, py in self.eng:
+            ex = self.x + px * ca - py * sa
+            ey = self.y + px * sa + py * ca
+            ln = self.r * random.uniform(0.12, 0.30)
+            f.line(ex, ey, ex + bx * ln, ey + by * ln,
+                   ramp("fire", random.uniform(0.15, 0.55)), 4)
+        if self.boss:      # a slow sweeping sensor blip along the spine
+            ph = 0.5 + 0.5 * math.sin(self.t * 2.2)
+            f.dot(self.x + (0.55 * ph + 0.1) * ca,
+                  self.y + (0.55 * ph + 0.1) * sa, A("flash"), 5)
 
 
 # ==========================================================================
@@ -668,7 +934,6 @@ class Game:
         self.msg_t = self.msg_t0 = 0.0
         self.timer = 0.0
         self.shake = 0.0
-        self.gun = False
         self.sweep = 0.0
         self.demo_fire = 0.0
         self.reset(full=True)
@@ -699,11 +964,10 @@ class Game:
 
     def movers(self):
         objs = (self.asteroids + self.bullets + self.particles +
-                self.shocks + self.debris + self.pops)
+                self.shocks + self.debris + self.pops + self.foes +
+                self.pickups)
         if self.ship:
             objs.append(self.ship)
-        if self.ufo:
-            objs.append(self.ufo)
         return objs
 
     # -- difficulty -------------------------------------------------------
@@ -726,8 +990,52 @@ class Game:
         return self.lerp(0.60, 1.80, self.diff())
 
     def rock_count(self):
-        # Three rocks for the first two waves, then one more each wave.
-        return min(3 + int((self.level - 1) * 0.9), 12)
+        # Rocks are scenery now - something to dodge while you fight, not the
+        # objective. A handful, and never a field to grind through.
+        return min(2 + self.level // 3, 6)
+
+    MAX_FOES = 7            # on screen at once, boss excepted
+
+    def is_boss_wave(self):
+        return self.level % 10 == 0
+
+    def is_mini_wave(self):
+        return self.level % 5 == 0 and not self.is_boss_wave()
+
+    def roster(self):
+        """The ships that will arrive this wave, in the order they arrive."""
+        lv = self.level
+        if self.is_boss_wave():
+            out = ["dread"] + ["gunship"] * 3 + ["scout"] * 4
+        elif self.is_mini_wave():
+            out = ["marauder"] + ["gunship"] * 2 + ["scout"] * 4
+        else:
+            scouts = min(3 + lv // 2, 10)
+            guns = min(lv // 3, 5)
+            out = ["scout"] * scouts + ["gunship"] * guns
+            random.shuffle(out)
+            return out
+        rest = out[1:]
+        random.shuffle(rest)
+        return out[:1] + rest      # the capital ship leads
+
+    def home(self, b, dt):
+        """Curve a seeker onto the nearest hull it can still reach."""
+        best, bd = None, 190.0
+        for foe in self.foes:
+            if foe.arrive > 0:
+                continue
+            d = self.wrap_dist(b.x, b.y, foe.x, foe.y)
+            if d < bd:
+                bd, best = d, foe
+        if best is None:
+            return
+        dx, dy = Raider.toward(b.x, b.y, best.x, best.y, self.world)
+        cur = math.atan2(b.vy, b.vx)
+        da = (math.atan2(dy, dx) - cur + math.pi) % TAU - math.pi
+        cur += max(-7.0 * dt, min(7.0 * dt, da))
+        sp = math.hypot(b.vx, b.vy)
+        b.vx, b.vy = sp * math.cos(cur), sp * math.sin(cur)
 
     def wrap_dist(self, x1, y1, x2, y2):
         w, h = self.world
@@ -759,15 +1067,19 @@ class Game:
         self.shocks = []
         self.debris = []
         self.pops = []
-        self.ufo = None
-        self.ufo_timer = 40.0
+        self.foes = []
+        self.pickups = []
+        self.queue = []            # classes still to arrive this wave
+        self.spawn_cd = 0.0
         self.ship = None
         self.fire_cd = 0.0
+        self.weapon = None         # None = the ship's own gun
+        self.ammo = 0
         if full:
             self.score = 0
             self.lives = 3
             self.level = 0
-            self.next_extra = 4000
+            self.next_extra = 20000
             self.shots = self.hits = 0
 
     def start_game(self):
@@ -789,21 +1101,44 @@ class Game:
         w, h = self.world
         d = self.diff()
         scale, spread = self.rock_scale(), 0.15 + 0.35 * d
-        for _ in range(self.rock_count()):
+        for _ in range(max(0, self.rock_count() - len(self.asteroids))):
             while True:
                 x, y = random.uniform(0, w), random.uniform(0, h)
                 if self.wrap_dist(x, y, w / 2, h / 2) > 60:
                     break
             self.asteroids.append(Asteroid(x, y, 3, scale, spread=spread))
-        self.ufo_timer = min(self.ufo_timer, self.ufo_gap())
-        if self.level == Ufo.FIRST_WAVE:
-            self.ufo_timer = self.lerp(20.0, 34.0, random.random())
+        self.queue = self.roster()
+        self.spawn_cd = 1.4
         if self.state != "title":
-            self.flash("WAVE %d" % self.level, 1.8)
+            if self.is_boss_wave():
+                self.flash("WAVE %d  -  DREADNOUGHT" % self.level, 2.4)
+            elif self.is_mini_wave():
+                self.flash("WAVE %d  -  MARAUDER" % self.level, 2.2)
+            else:
+                self.flash("WAVE %d" % self.level, 1.8)
             self.sweep = 0.45
 
-    def ufo_gap(self):
-        return self.lerp(38.0, 12.0, self.diff()) * random.uniform(0.8, 1.25)
+    def spawn_gap(self):
+        return self.lerp(2.6, 0.9, self.diff()) * random.uniform(0.75, 1.3)
+
+    def spawn_foe(self, kind):
+        """Bring one ship in from an edge, away from the player."""
+        w, h = self.world
+        best = None
+        for _ in range(12):
+            if random.random() < 0.5:
+                x, y = random.uniform(0, w), random.choice((2.0, h - 3.0))
+            else:
+                x, y = random.choice((2.0, w - 3.0)), random.uniform(0, h)
+            d = (self.wrap_dist(x, y, self.ship.x, self.ship.y)
+                 if self.ship else 1e9)
+            if best is None or d > best[0]:
+                best = (d, x, y)
+            if d > 70:
+                break
+        self.foes.append(Raider(kind, best[1], best[2], self.diff(),
+                                self.world))
+        self.shocks.append(Shock(best[1], best[2], 2, 20, 0.4))
 
     def flash(self, text, t=1.4):
         self.msg, self.msg_t, self.msg_t0 = text, t, t
@@ -824,7 +1159,7 @@ class Game:
         if x is not None:
             self.pops.append(Pop(x, y, "+%d" % pts, attr or A("ui_hi")))
         if self.score >= self.next_extra:
-            self.next_extra += 4000
+            self.next_extra += 20000
             self.lives += 1
             self.flash("EXTRA SHIP", 1.6)
 
@@ -833,18 +1168,32 @@ class Game:
         s = self.ship
         if s is None or self.fire_cd > 0:
             return
-        if sum(1 for b in self.bullets if not b.hostile) >= 8:
+        spec = WEAPONS[self.weapon] if self.weapon else None
+        cap = 18 if spec else 8
+        if sum(1 for b in self.bullets if not b.hostile) >= cap:
             return
-        self.fire_cd = 0.14
-        sp = Bullet.SPEED
+        self.fire_cd = spec["cd"] if spec else 0.14
+        sp = Bullet.SPEED * (0.85 if self.weapon == "gauss" else 1.0)
         nose = s.hull()[0]
-        self.bullets.append(Bullet(
-            nose[0] % self.world[0], nose[1] % self.world[1],
-            sp * math.cos(s.ang) + s.vx * 0.3,
-            sp * math.sin(s.ang) + s.vy * 0.3,
-            Bullet.reach(self.world)))
+        x, y = nose[0] % self.world[0], nose[1] % self.world[1]
+        angles = [s.ang]
+        dmg, kind, col = 1, self.weapon, spec["col"] if spec else None
+        if self.weapon == "spread":
+            angles = [s.ang - 0.21, s.ang, s.ang + 0.21]
+        elif self.weapon == "gauss":
+            dmg = 3
+        for a in angles:
+            self.bullets.append(Bullet(
+                x, y, sp * math.cos(a) + s.vx * 0.3,
+                sp * math.sin(a) + s.vy * 0.3,
+                Bullet.reach(self.world, sp), dmg=dmg, kind=kind, col=col))
         if self.state != "title":
             self.shots += 1
+        if spec:
+            self.ammo -= 1
+            if self.ammo <= 0:
+                self.weapon = None
+                self.flash("MAGAZINE DRY", 1.1)
         # muzzle flash
         for _ in range(3):
             a = s.ang + random.uniform(-0.4, 0.4)
@@ -896,9 +1245,11 @@ class Game:
         self.fire_cd = max(0.0, self.fire_cd - dt)
         for st in self.stars:
             st.update(dt, self.world, self.ship)
-        for group in (self.particles, self.shocks, self.debris, self.pops):
+        for group in (self.particles, self.shocks, self.debris, self.pops,
+                      self.pickups):
             for o in group:
                 o.update(dt, self.world)
+        self.pickups = [p for p in self.pickups if p.life > 0]
         self.particles = [p for p in self.particles if p.life > 0]
         self.shocks = [s for s in self.shocks if s.life > 0]
         self.debris = [d for d in self.debris if d.life > 0]
@@ -920,6 +1271,8 @@ class Game:
             self.timer -= dt
             for a in self.asteroids:
                 a.update(dt, self.world)
+            for foe in self.foes:
+                foe.update(dt, self.world, None, self.bullets)
             for b in self.bullets:
                 b.update(dt, self.world)
             self.bullets = [b for b in self.bullets if b.life > 0]
@@ -932,9 +1285,7 @@ class Game:
             return
 
         # ---- playing ----
-        self.gun = getattr(keys, "gun", False)
-        if self.gun:
-            self.fire()          # rate-limited by fire_cd, so this is safe
+        self.fire()             # the gun runs itself; fire_cd paces it
         s = self.ship
         if s:
             if self.mode == "arcade":
@@ -957,24 +1308,25 @@ class Game:
             a.update(dt, self.world)
         for b in self.bullets:
             b.update(dt, self.world)
+            if b.kind == "homing" and not b.hostile:
+                self.home(b, dt)
         self.bullets = [b for b in self.bullets if b.life > 0]
 
-        if self.ufo is None:
-            if self.level >= Ufo.FIRST_WAVE:
-                self.ufo_timer -= dt
-            if self.ufo_timer <= 0 and self.asteroids:
-                self.ufo = Ufo(self.world, self.level, self.diff())
-                self.flash("SAUCER", 1.0)
-        elif not self.ufo.update(dt, self.world, self.ship, self.bullets):
-            self.ufo = None
-            self.ufo_timer = self.ufo_gap()
+        self.spawn_cd -= dt
+        if (self.queue and self.spawn_cd <= 0 and
+                len(self.foes) < self.MAX_FOES):
+            self.spawn_foe(self.queue.pop(0))
+            self.spawn_cd = self.spawn_gap()
+        for foe in self.foes:
+            foe.update(dt, self.world, self.ship, self.bullets)
 
         self.collisions()
-        if not self.asteroids and self.ufo is None:
+        # The wave is the fleet. Leftover rocks drift on into the next one.
+        if not self.foes and not self.queue:
             self.spawn_wave()
 
     def update_title(self, dt):
-        """Attract mode: a ship loops around shooting up the rocks."""
+        """Attract mode: a demo ship loops around duelling interceptors."""
         s = self.ship
         if s:
             s.fly_classic(dt, math.sin(time.time() * 0.5) * 0.9, True, False,
@@ -996,54 +1348,90 @@ class Game:
                     if b in self.bullets:
                         self.bullets.remove(b)
                     break
-        if len(self.asteroids) < 5:
-            w, h = self.world
-            edge = random.random()
+        for foe in self.foes:
+            foe.update(dt, self.world, s, self.bullets)
+        for b in list(self.bullets):
+            if b.hostile:
+                continue
+            for foe in list(self.foes):
+                if self.wrap_dist(b.x, b.y, foe.x, foe.y) < foe.r:
+                    if b in self.bullets:
+                        self.bullets.remove(b)
+                    if foe.hit():
+                        self.kill_foe(foe, award=False)
+                    break
+        w, h = self.world
+        if len(self.asteroids) < 3:
             self.asteroids.append(Asteroid(
-                w * edge, 0 if random.random() < 0.5 else h - 1, 3, 1.0))
+                w * random.random(), 0 if random.random() < 0.5 else h - 1,
+                3, 1.0))
+        if len(self.foes) < 2:
+            self.spawn_foe("scout" if random.random() < 0.7 else "gunship")
 
     def collisions(self):
         for b in list(self.bullets):
             if b.hostile:
                 continue
-            for a in list(self.asteroids):
-                if self.wrap_dist(b.x, b.y, a.x, a.y) < a.r:
-                    self.split(a)
-                    if b in self.bullets:
+            for foe in list(self.foes):          # ships first: they are the
+                if foe.arrive > 0:               # point of the wave now
+                    continue
+                if b.spent is not None and foe in b.spent:
+                    continue
+                if self.wrap_dist(b.x, b.y, foe.x, foe.y) < foe.r:
+                    if b.spent is None:
                         self.bullets.remove(b)
+                    else:
+                        b.spent.add(foe)         # a lance carries on through
                     self.hits += 1
+                    if foe.hit(b.dmg):
+                        self.kill_foe(foe)
+                    else:
+                        self.burst(b.x, b.y, 3, 34, 0.18)
                     break
             else:
-                u = self.ufo
-                if u and self.wrap_dist(b.x, b.y, u.x, u.y) < u.r + 2:
-                    self.add_score(u.value, u.x, u.y, A("ufo"))
-                    self.burst(u.x, u.y, 34, 95, 0.9)
-                    self.shocks.append(Shock(u.x, u.y, 4, 34, 0.5))
-                    self.shake = 0.3
-                    self.ufo = None
-                    self.ufo_timer = self.ufo_gap()
-                    self.hits += 1
-                    if b in self.bullets:
-                        self.bullets.remove(b)
+                for a in list(self.asteroids):
+                    if self.wrap_dist(b.x, b.y, a.x, a.y) < a.r:
+                        self.split(a)
+                        if b in self.bullets:
+                            self.bullets.remove(b)
+                        self.hits += 1
+                        break
 
         s = self.ship
         if s is None:
             return
+        for pk in list(self.pickups):
+            if self.wrap_dist(s.x, s.y, pk.x, pk.y) < Pickup.R + Ship.RADIUS:
+                self.pickups.remove(pk)
+                spec = WEAPONS[pk.kind]
+                # A fresh magazine of the same type tops it up rather than
+                # resetting it, so a lucky double drop is not wasted.
+                self.ammo = (self.ammo if self.weapon == pk.kind else 0)
+                self.ammo += spec["ammo"]
+                self.weapon = pk.kind
+                self.fire_cd = 0.0
+                self.flash(spec["name"], 1.1)
+                self.shocks.append(Shock(pk.x, pk.y, 2, 20, 0.35))
+                self.burst(pk.x, pk.y, 10, 55, 0.4)
         for a in list(self.asteroids):
             if self.wrap_dist(s.x, s.y, a.x, a.y) < a.r + Ship.RADIUS:
                 if s.invuln <= 0:
                     self.kill_ship()
                     self.split(a, award=False)
                 return
-        u = self.ufo
-        if u and self.wrap_dist(s.x, s.y, u.x, u.y) < u.r + Ship.RADIUS:
-            if s.invuln <= 0:
-                self.kill_ship()
-                self.burst(u.x, u.y, 24, 80, 0.8)
-                self.shocks.append(Shock(u.x, u.y, 4, 30, 0.5))
-                self.ufo = None
-                self.ufo_timer = self.ufo_gap()
-            return
+        for foe in list(self.foes):
+            if foe.arrive > 0:
+                continue
+            if self.wrap_dist(s.x, s.y, foe.x, foe.y) < foe.r * 0.8 + \
+                    Ship.RADIUS:
+                if s.invuln <= 0:
+                    self.kill_ship()
+                    # Ramming a capital ship hurts it; it does not kill it.
+                    for _ in range(3 if foe.boss else foe.hp):
+                        if foe.hit():
+                            self.kill_foe(foe, award=False)
+                            break
+                return
         for b in list(self.bullets):
             if b.hostile and self.wrap_dist(s.x, s.y, b.x, b.y) < Ship.RADIUS + 2:
                 self.bullets.remove(b)
@@ -1071,6 +1459,36 @@ class Game:
                 child.flash = 0.08
                 self.asteroids.append(child)
 
+    DROP = {"scout": 0.10, "gunship": 0.26}
+
+    def kill_foe(self, foe, award=True):
+        if foe not in self.foes:
+            return
+        self.foes.remove(foe)
+        if award:
+            self.add_score(foe.value, foe.x, foe.y, A(foe.col))
+            # Wrecks give up their magazines. A capital ship gives up several.
+            drops = (3 if foe.kind == "dread" else 2) if foe.boss else (
+                1 if random.random() < self.DROP.get(foe.kind, 0.0) else 0)
+            for _ in range(drops):
+                self.pickups.append(
+                    Pickup(foe.x, foe.y, random.choice(WEAPON_KINDS)))
+        n = int(18 + foe.r * 2.4)
+        self.burst(foe.x, foe.y, n, 70 + foe.r * 3.0, 0.7 + foe.r * 0.03)
+        self.shocks.append(Shock(foe.x, foe.y, foe.r * 0.4, foe.r * 3.2,
+                                 0.4 + foe.r * 0.012))
+        self.shake = max(self.shake, 0.14 + foe.r * 0.012)
+        if foe.boss:
+            self.shocks.append(Shock(foe.x, foe.y, 2, foe.r * 5.5, 0.9))
+            self.flash("%s DOWN" % ("DREADNOUGHT" if foe.kind == "dread"
+                                    else "MARAUDER"), 2.0)
+            for _ in range(6):     # the hull comes apart
+                a = random.uniform(0, TAU)
+                sp = random.uniform(18, 55)
+                self.debris.append(Debris(
+                    foe.x, foe.y, sp * math.cos(a), sp * math.sin(a),
+                    foe.r * random.uniform(0.5, 1.1), 1.6))
+
     def kill_ship(self):
         s = self.ship
         nose, left, right, tail = s.hull()
@@ -1086,6 +1504,7 @@ class Game:
         self.shocks.append(Shock(s.x, s.y, 3, 46, 0.65))
         self.shake = 0.45
         self.ship = None
+        self.weapon, self.ammo = None, 0     # the magazine goes with the ship
         self.lives -= 1
         self.state = "dead"
         self.timer = 1.7
@@ -1124,8 +1543,10 @@ class Game:
             d.draw(f)
         for a in self.asteroids:
             a.draw(f)
-        if self.ufo:
-            self.ufo.draw(f)
+        for pk in self.pickups:
+            pk.draw(f)
+        for foe in self.foes:
+            foe.draw(f)
         for b in self.bullets:
             b.draw(f)
         if self.ship:
@@ -1175,12 +1596,15 @@ class Game:
         if self.lives > 0 and x + self.lives * 2 + 2 < w - 24:
             sc.text(x, 0, " " + " ".join("▲" * self.lives) + " ", A("ship"))
             x += self.lives * 2 + 2
-        rocks = len(self.asteroids)
+        boss = next((f for f in self.foes if f.boss), None)
+        left_over = len(self.foes) + len(self.queue)
         mid = "WAVE %d" % self.level
         if w > 56:
-            mid += "  " + ("◆" * min(rocks, 12) if rocks else "CLEAR")
+            mid += "  " + ("▾" * min(left_over, 12) if left_over else "CLEAR")
         if x + len(mid) + 6 < w - 16:
             sc.text((w - len(mid)) // 2 - 1, 0, " " + mid + " ", A("accent"))
+        if boss is not None and w > 64:
+            self.boss_bar(sc, boss)
         right = "HIGH %d" % max(self.high, self.score)
         if len(right) + 6 < w:
             sc.text(w - len(right) - 3, 0, " " + right + " ", A("ui"))
@@ -1191,11 +1615,16 @@ class Game:
         mode = "ARCADE" if self.mode == "arcade" else "CLASSIC"
         sc.text(2, y, " %s " % mode, A("warn"))
         left = 2 + len(mode) + 2
-        gun = "GUN " + ("●" if self.gun else "○")
-        if left + len(gun) + 2 < self.sw - 26:
-            sc.text(left, y, " %s " % gun,
-                    A("ui_hi") if self.gun else A("dim"))
-            left += len(gun) + 2
+        if self.weapon:
+            spec = WEAPONS[self.weapon]
+            cells = 6
+            full = max(1, int(round(cells * self.ammo / spec["ammo"])))
+            full = min(cells, full)
+            tag = "%s %s" % (spec["name"],
+                             BAR_FULL * full + BAR_EMPTY * (cells - full))
+            if left + len(tag) + 2 < self.sw - 26:
+                sc.text(left, y, " %s " % tag, A(spec["col"]))
+                left += len(tag) + 2
         s = self.ship
         charge = 1.0 if s is None else 1.0 - s.warp_cd / 3.0
         bars = max(0, min(4, int(charge * 4 + 0.001)))
@@ -1206,14 +1635,14 @@ class Game:
             sc.text(right, y, " " + warp + " ",
                     A("ui_hi") if bars == 4 else A("dim"))
         hints = [
-            ("↑↓←→ hold to fly  YUBN diagonal  SPACE gun  X warp"
-             "  M model  P pause  Q quit"
+            ("↑↓←→ hold to fly  YUBN diagonal  guns fire themselves"
+             "  X warp  M model  P pause  Q quit"
              if self.mode == "arcade" else
-             "←→ turn  ↑ thrust  SPACE gun  X warp  M model  P pause  Q quit"),
-            ("↑↓←→ fly  YUBN diagonal  SPACE gun  X warp  M model  Q quit"
+             "←→ turn  ↑ thrust  guns automatic  X warp  M model  Q quit"),
+            ("↑↓←→ fly  YUBN diagonal  auto guns  X warp  M model  Q quit"
              if self.mode == "arcade" else
-             "←→ turn  ↑ thrust  SPACE gun  X warp  Q quit"),
-            "MOVE · GUN · WARP",
+             "←→ turn  ↑ thrust  auto guns  X warp  Q quit"),
+            "FLY · WARP",
         ]
         gap = right - left
         for hint in hints:
@@ -1221,6 +1650,17 @@ class Game:
                 sc.text(left + (gap - len(hint)) // 2, y, " %s " % hint,
                         A("dim"))
                 break
+
+    def boss_bar(self, sc, boss):
+        """Hull integrity, on the frame line under the score bar."""
+        w = self.sw
+        name = "DREADNOUGHT" if boss.kind == "dread" else "MARAUDER"
+        cells = max(8, min(28, w // 4))
+        full = int(round(cells * max(0.0, boss.hp) / boss.hp0))
+        bar = BAR_FULL * full + BAR_EMPTY * (cells - full)
+        s = " %s %s " % (name, bar)
+        x = max(1, (w - len(s)) // 2)
+        sc.text(x, 1, s, A(boss.col) if boss.flash <= 0 else A("flash"))
 
     def title_bars(self, sc):
         y = self.sh - 1
@@ -1299,14 +1739,17 @@ class Game:
                  if self.mode == "arcade"
                  else "hold to turn and thrust - there are no brakes"),
              A("dim")),
-            (2, "SPACE  gun on / off      X hyperspace      P pause", A("ui")),
+            (2, "guns fire themselves - fly to aim      X hyperspace",
+             A("ui")),
             (3, "M  flight model:  %s" % mode, A("warn")),
-            (5, "rocks 20 / 50 / 100      saucer 200 / 1000", A("dim")),
+            (5, "interceptor 150   gunship 400   rocks 20/50/100", A("dim")),
+            (6, "MARAUDER every 5th wave 2500   DREADNOUGHT every 10th 12000",
+             A("warn")),
         ]
         if self.high:
-            rows.append((6, "high score  %d" % self.high, A("accent")))
+            rows.append((7, "high score  %d" % self.high, A("accent")))
         pulse = math.sin(time.time() * 4.0) > 0
-        rows.append((8, "───  PRESS  SPACE  TO  LAUNCH  ───",
+        rows.append((9, "───  PRESS  SPACE  TO  LAUNCH  ───",
                      A("warn") if pulse else A("dim")))
         for dy, text, attr in rows:
             self.matte(sc, y + dy, len(text))
@@ -1388,9 +1831,6 @@ class Keys:
     CARRY_OTHER = 1.0   # a fire/warp/pause press carries them this long
     CARRY_HI = 0.50     # carried push right after the last real press...
     CARRY_LO = 0.10     # ...fading to this as the carry window runs out
-    # SPACE presses closer together than this are the OS repeat train, not a
-    # second deliberate tap, so they must not toggle the gun back off.
-    GUN_TAP = 0.30
     DIRS = ("left", "right", "up", "down")
     OPPOSITE = {"left": "right", "right": "left", "up": "down", "down": "up"}
 
@@ -1400,9 +1840,8 @@ class Keys:
         self.carried = dict.fromkeys(self.DIRS, -9.0)  # carried hold expiry
         self.delay = self.DELAY_GUESS                 # learned repeat delay
         self.gap = self.REPEAT / 2.6                  # learned repeat period
+        self.last_gap = dict.fromkeys(self.DIRS, 0.0)  # for spotting a train
         self.now = 0.0
-        self.gun = False                              # latched auto-fire
-        self.gun_t = -9.0
 
     @property
     def first(self):
@@ -1423,21 +1862,6 @@ class Keys:
         for name in self.DIRS:
             self.real[name] = self.hold[name] = self.carried[name] = -9.0
 
-    def press_fire(self, now):
-        """SPACE latches the gun rather than firing one shot per event.
-
-        Terminals only repeat the most recently pressed key, so a held SPACE
-        falls silent the instant you touch an arrow - you cannot fly and shoot
-        at the same time as long as fire depends on the repeat train. So the
-        gun latches instead: tap to arm it, tap again to stop, and steering
-        never interrupts the stream. Repeats from a held
-        SPACE arrive far too fast to be a second deliberate tap, so they only
-        ever re-affirm the latch.
-        """
-        self.gun = True if now - self.gun_t <= self.GUN_TAP else not self.gun
-        self.gun_t = now
-        return self.gun
-
     def press(self, names, now):
         for name in names:
             fresh = now >= self.hold[name]
@@ -1447,10 +1871,23 @@ class Keys:
             # after the window lapsed is what stops a too-short guess from
             # making a held key stutter forever.
             gap = now - self.real[name]
-            if 0.12 < gap < self.FIRST_MAX * 1.2:
-                self.delay = max(gap, self.delay * 0.85)
-            if 0.0 < gap < 0.30:            # inside a train: that is a period
-                self.gap = max(gap, self.gap * 0.88)
+            # Only a repeat *train* may teach us anything. A gap on its own
+            # says nothing - steering taps land 0.2-0.4 s apart and look
+            # exactly like a delay-until-repeat, and letting those through
+            # drags the learned delay below the real one, which makes every
+            # held key stutter. A train is unmistakable though: a short gap
+            # right behind a much longer one. The long gap was the delay, the
+            # short one is the period.
+            prev = self.last_gap[name]
+            if 0.0 < gap < 0.25 and gap * 2.0 < prev < 2.5:
+                self.delay = max(min(prev, 1.5), self.delay * 0.98)
+                self.gap = max(gap, self.gap * 0.9)
+            elif not fresh and 0.0 < gap < 0.25 and 0.0 < prev < 0.25:
+                # Two short gaps in a row while the window is still open: we
+                # are inside the train, so keep refining the period. Only the
+                # period - a steady train says nothing new about the delay.
+                self.gap = max(gap, self.gap * 0.9)
+            self.last_gap[name] = gap
             self.hold[name] = now + (self.first if fresh else self.window)
             self.real[name] = now
             opp = self.OPPOSITE[name]
@@ -1476,15 +1913,67 @@ class Keys:
         the key really was released it reads as ordinary drift.
         """
         now = self.now
-        if now < self.hold[name]:
-            return 1.0
+        live = self.hold[name]
+        if now < live:
+            v = 1.0
+        else:
+            # One dropped repeat should dip the throttle, not cut it dead, so
+            # the window eases out over a fraction of a repeat period rather
+            # than ending on a cliff. A real release still lands inside it.
+            fade = self.window * 0.6
+            v = max(0.0, 1.0 - (now - live) / fade)
         if now < self.carried[name]:
             t = min(1.0, max(0.0, (now - self.real[name]) / self.CARRY_OTHER))
-            return self.CARRY_HI + (self.CARRY_LO - self.CARRY_HI) * t
-        return 0.0
+            v = max(v, self.CARRY_HI + (self.CARRY_LO - self.CARRY_HI) * t)
+        return v
 
     def held(self, name):
         return self.axis(name) > 0.0
+
+
+class Reader:
+    """Drain curses input, re-assembling arrow sequences by hand.
+
+    With nodelay set, ncurses hands back a bare ESC rather than block waiting
+    for the rest of a sequence, so on plenty of terminals an arrow key arrives
+    as 27 '[' 'C' instead of KEY_RIGHT. Left alone that reads as three unknown
+    keys - the ship never moves on arrows, or moves only on the presses that
+    happened to be assembled, which is indistinguishable from a stutter.
+    """
+
+    ARROW = {65: curses.KEY_UP, 66: curses.KEY_DOWN,
+             67: curses.KEY_RIGHT, 68: curses.KEY_LEFT}
+    PARTIAL = 0.05          # how long to wait for the rest of a sequence
+
+    def __init__(self, stdscr):
+        self.s = stdscr
+        self.buf = []
+        self.t = 0.0
+
+    def read(self, now):
+        while True:
+            c = self.s.getch()
+            if c == -1:
+                break
+            self.buf.append(c)
+            self.t = now
+        out, b, i = [], self.buf, 0
+        while i < len(b):
+            c = b[i]
+            if c != 27:
+                out.append(c)
+                i += 1
+            elif len(b) - i >= 3 and b[i + 1] in (91, 79):
+                key = self.ARROW.get(b[i + 2])
+                out.append(key if key is not None else 27)
+                i += 3 if key is not None else 1
+            elif len(b) - i < 3 and now - self.t < self.PARTIAL:
+                break                      # still arriving - keep it for next
+            else:
+                out.append(27)             # a real, lone Escape
+                i += 1
+        self.buf = b[i:]
+        return out
 
 
 def run(stdscr):
@@ -1504,6 +1993,7 @@ def run(stdscr):
 
     game = Game(w, h)
     keys = Keys()
+    reader = Reader(stdscr)
     prev_state = game.state
     now = time.perf_counter()
     last = now
@@ -1513,10 +2003,7 @@ def run(stdscr):
         dt = min(now - last, 0.06)
         last = now
 
-        while True:
-            c = stdscr.getch()
-            if c == -1:
-                break
+        for c in reader.read(now):
             if c == curses.KEY_RESIZE:
                 h, w = stdscr.getmaxyx()
                 if w >= MIN_W and h >= MIN_H:
@@ -1552,19 +2039,12 @@ def run(stdscr):
             elif c in (ord(" "), curses.KEY_ENTER, 10, 13):
                 if game.state in ("title", "over"):
                     game.start_game()
-                    keys.gun = True        # launch already armed
-                    keys.gun_t = now
-                elif game.state in ("play", "dead", "paused"):
-                    # Arming while paused or between lives is fine; actually
-                    # loosing a round into a stopped game is not.
-                    if keys.press_fire(now) and game.state == "play":
-                        game.fire()
+                elif game.state == "play":
+                    game.fire()
 
         if game.state != prev_state:
             if game.state != "play":
                 keys.brake()          # a new ship starts stationary
-            if game.state in ("title", "over"):
-                keys.gun = False      # but the gun stays latched across lives
             prev_state = game.state
         keys.tick(now)
         game.advance(dt, keys)
@@ -1600,13 +2080,19 @@ def selftest(frames=1500):
             keys.press(("right",), t + 0.01)
         if i % 8 == 0:
             keys.other(t)
-        if i in (60, 900):
-            keys.press_fire(t)          # latch the gun on, then back off
         g.advance(1 / FPS, keys)
         if i % 8 == 0:
             g.fire()
         if i % 300 == 299:
             g.hyperspace()
+        if i == 500:                    # jump to a mini-boss wave
+            g.level = 4
+            g.foes = []
+            g.queue = []
+        if i == 1100:                   # and to a boss wave
+            g.level = 9
+            g.foes = []
+            g.queue = []
         if i == 250:
             g.toggle_mode()
         if i == 400:
@@ -1636,12 +2122,104 @@ def selftest(frames=1500):
           % (g.score, g.level, len(g.movers()), g.mode))
 
 
+def keytest(stdscr):
+    """Show what this terminal really sends while a key is held down.
+
+    Every tuning constant in Keys is a bet about the answer, so when the ship
+    stutters this is the thing to look at first.
+    """
+    curses.curs_set(0)
+    stdscr.nodelay(True)
+    stdscr.keypad(True)
+    named = {curses.KEY_LEFT: "LEFT", curses.KEY_RIGHT: "RIGHT",
+             curses.KEY_UP: "UP", curses.KEY_DOWN: "DOWN"}
+    log, last, prev_gap = [], {}, {}
+    delays, periods = [], []
+    reader = Reader(stdscr)
+    t0 = time.perf_counter()
+    while True:
+        now = time.perf_counter()
+        for c in reader.read(now):
+            if c in (ord("q"), ord("Q")):
+                return delays, periods
+            name = named.get(c) or (chr(c) if 32 <= c < 127 else "#%d" % c)
+            gap = now - last[name] if name in last else None
+            if gap is not None and 0.0 < gap < 0.25:
+                periods.append(gap)
+                p = prev_gap.get(name)
+                if p and gap * 2.0 < p < 2.5:
+                    delays.append(p)
+            prev_gap[name] = gap
+            last[name] = now
+            log.append((now - t0, name, gap))
+            del log[:-400]
+
+        stdscr.erase()
+        h, w = stdscr.getmaxyx()
+        rows = [
+            "KEY REPEAT TEST",
+            "",
+            "Hold ONE arrow key down for about three seconds, then let go.",
+            "Do that two or three times, then press Q.",
+            "",
+        ]
+        med = sorted(periods)[len(periods) // 2] if periods else None
+        dly = sorted(delays)[len(delays) // 2] if delays else None
+        rows.append("events seen   %d" % len(log))
+        rows.append("repeat rate   %s" % (
+            "%.0f/s  (one every %.0f ms)" % (1.0 / med, med * 1000)
+            if med else "no repeat train seen yet"))
+        rows.append("delay first   %s" % (
+            "%.0f ms" % (dly * 1000) if dly else "-"))
+        rows.append("")
+        if not periods:
+            rows.append("Keep holding. If this stays empty, your terminal is")
+            rows.append("not auto-repeating - hold-to-fly cannot work here.")
+        elif dly and dly > Keys.FIRST_MAX:
+            rows.append("Repeat starts later than the game waits (%.0f ms)."
+                        % (Keys.FIRST_MAX * 1000))
+            rows.append("Every held key will stutter once at the start.")
+        else:
+            rows.append("Looks healthy - hold-to-fly should be smooth.")
+        rows.append("")
+        rows.append("recent events (gap from the one before it)")
+        for t, name, gap in log[-min(10, max(0, h - len(rows) - 3)):]:
+            rows.append("   %7.3fs  %-6s %s" % (
+                t, name, "%6.0f ms" % (gap * 1000) if gap else "     -"))
+        rows.append("")
+        rows.append("Q to finish")
+        for i, s in enumerate(rows[:h - 1]):
+            try:
+                stdscr.addstr(i, 1, s[:w - 2])
+            except curses.error:
+                pass
+        stdscr.noutrefresh()
+        curses.doupdate()
+        time.sleep(1.0 / 60.0)
+
+
+def report_keytest(delays, periods):
+    med = sorted(periods)[len(periods) // 2] if periods else None
+    dly = sorted(delays)[len(delays) // 2] if delays else None
+    print("key repeat: %s, delay %s  (%d periods, %d delays sampled)" % (
+        "%.1f/s (%.0f ms)" % (1.0 / med, med * 1000) if med else "NONE SEEN",
+        "%.0f ms" % (dly * 1000) if dly else "unknown",
+        len(periods), len(delays)))
+    if not med:
+        print("Your terminal is not auto-repeating held keys. Arcade flight "
+              "needs that;\nturn key repeat back on, or the ship will only "
+              "dash once per press.")
+
+
 def main():
     if "--selftest" in sys.argv:
         selftest()
         return
     locale.setlocale(locale.LC_ALL, "")
     os.environ.setdefault("ESCDELAY", "25")
+    if "--keytest" in sys.argv:
+        report_keytest(*curses.wrapper(keytest))
+        return
     try:
         curses.wrapper(run)
     except KeyboardInterrupt:

@@ -1,7 +1,10 @@
 # Terminal Asteroids
 
-A full Asteroids game that runs in your terminal, in a single Python file with
-no dependencies beyond the standard library.
+A space combat game that runs in your terminal, in a single Python file with
+no dependencies beyond the standard library. You fly one ship against a hostile
+fleet — interceptors, gunships, and a capital ship every fifth wave. The
+asteroids are still there, but they are weather now: something to dodge while
+you fight, not the thing you are fighting.
 
 The play field is a real pixel buffer: every character cell carries a 2×4 grid
 of Unicode braille dots, which gives 8× the resolution of character graphics —
@@ -31,7 +34,7 @@ sub-character instead of jumping from cell to cell.
 │      ⢀           ⢸      ⠇⣀⠕    ⢑⠄                                                                │
 │                   ⢣          ⢀⠔⠁                                           ⠄                     │
 │                    ⠣⡀      ⣀⠔⠁       ⠈                                            ⡠⠤⠔⠒⠒⠒⠒⢲       │
-╰─ ARCADE ─ GUN ● ─── ↑↓←→ fly  YUBN diagonal  SPACE gun  X warp  M model  Q quit ────── WARP ▰▰▰▰ ╯
+╰─ ARCADE ────────── ↑↓←→ fly  YUBN diagonal  auto guns  X warp  M model  Q quit ───────── WARP ▰▰▰▰ ╯
 ```
 
 ## Run
@@ -51,7 +54,7 @@ fallback.
 | `↑ ↓ ← →` / `WASD` | hold to fly (arcade) · turn, thrust, retro-burn (classic) |
 | `Y` `U` `B` `N` | one-key diagonals: up-left, up-right, down-left, down-right |
 | `7` `9` `1` `3` | the same four diagonals, on the keypad |
-| `Space` | gun on/off — also launches from the title screen, already armed |
+| `Space` | launch, from the title screen or after a game over |
 | `0` `.` `,` `5` | all stop |
 | `X` | hyperspace: jump somewhere else, 3s cooldown |
 | `M` | switch flight model |
@@ -82,26 +85,32 @@ Press `M` any time to swap. Your choice and your high score persist in
 
 ## The gun
 
-`Space` does not fire one shot — it **latches the gun on**, and it stays on
-while you fly, through a lost ship and into the next wave, until you press
-`Space` again. The lamp in the bottom bar reads `GUN ●` when it is running and
-`GUN ○` when it is not, and launching from the title screen already arms it.
+**You do not press anything to shoot.** The gun runs on its own for as long as
+you are alive — but it does *not* aim itself. The nose follows the way you are
+flying, so where you point the ship is where the rounds go, and stopping
+leaves the nose on its last heading, still firing along it. Flying is aiming.
 
-This is the same trick sticky course plays, for the same reason. A terminal
-auto-repeats only the *most recently pressed* key, so a held `Space` falls
-silent the instant you touch an arrow — under a fire-per-keypress gun you
-genuinely could not fly and shoot at once, and every course correction cut the
-stream until you released and pressed again. A latch has nothing to interrupt.
+Automatic fire is not a convenience here, it is the only thing that works. A
+terminal auto-repeats only the *most recently pressed* key, so a held `Space`
+falls silent the instant you touch an arrow — any gun bound to a key cuts out
+every time you steer, which is exactly when you need it. A gun with no key has
+nothing to interrupt.
+
+The cost is that aiming means turning the ship toward the thing shooting at
+you. That is the game: a bot that circles, dodges and grabs magazines lands
+about 11% of its shots and dies around wave 8.
 
 ## Scoring
 
-| Target | Points |
-| --- | --- |
-| Large asteroid | 20 |
-| Medium asteroid | 50 |
-| Small asteroid | 100 |
-| Saucer | 200 |
-| Small saucer (wave 3+, aims at you) | 1000 |
+| Target | Hull | Points |
+| --- | --- | --- |
+| Large asteroid | 1 | 20 |
+| Medium asteroid | 1 | 50 |
+| Small asteroid | 1 | 100 |
+| Interceptor — fast, darts and circles | 1 | 150 |
+| Gunship — twin nacelles, fires pairs | 2 | 400 |
+| **Marauder** — mini boss, every 5th wave | 11 | 2,500 |
+| **Dreadnought** — boss, every 10th wave | 28 | 12,000 |
 
 Your shots burn out when they reach the edge of the field rather than wrapping
 around it, and their range scales with your window, so a shot always crosses
@@ -109,34 +118,69 @@ the same fraction of the screen whether you play in a small terminal or
 fullscreen.
 
 Asteroids split in two on each hit — large → medium → small → gone. Three
-lives and an extra ship every 4,000 points. Clear the field and the next wave
-arrives. Game over reports your score, waves survived, and shooting accuracy.
+lives and an extra ship every 20,000 points. A wave ends when its fleet is
+destroyed; leftover rocks drift on into the next one. Ramming a fighter kills
+you and it both; ramming a capital ship only dents it. Game over reports your
+score, waves survived, and shooting accuracy.
+
+## Weapons
+
+Your own gun is one bolt at a time. Anything better has to be taken off a
+wreck: an interceptor drops a magazine 10% of the time, a gunship 26%, and a
+capital ship always gives up two or three. Fly over the tumbling hex to load
+it. One magazine at a time, it runs out, and it does not survive your death —
+picking up the same type again tops the count up instead of resetting it.
+
+| | Magazine | Effect |
+| --- | --- | --- |
+| **S** SPREAD | 55 | a fan of three, 6 shots/s |
+| **R** RAPID | 150 | one bolt at 17 shots/s |
+| **P** LANCE | 60 | passes through hulls and keeps going |
+| **H** SEEKER | 55 | curves onto the nearest ship on its own |
+| **G** GAUSS | 26 | three hull points a slug, 3.5 shots/s |
+
+GAUSS drops a gunship in one and a Marauder in four; SEEKER is the one weapon
+that aims for you, so it is worth breaking off for. The catch is that a
+magazine is always somewhere you would rather not be — chasing one is what
+gets you killed.
 
 ## Difficulty
 
-Wave 1 is deliberately gentle — three slow rocks, no saucer, and a long
-respawn shield. One eased dial then ramps everything through wave 10: rock
-count and speed, how much of a speed kick fragments get when they split, and
-how often saucers come and how well they shoot.
+Wave 1 is three interceptors and two drifting rocks. One eased dial then ramps
+the fleet through wave 10 — how many ships, how fast, and how often they fire.
 
-| Wave | Rocks | Large rock speed | Saucer | Aiming saucer |
+| Wave | Fleet | Rocks | Interceptor speed | Volley gap |
 | --- | --- | --- | --- | --- |
-| 1 | 3 | 10 px/s | never | no |
-| 2 | 3 | 11 px/s | every ~37 s | no |
-| 4 | 5 | 14 px/s | every ~34 s | 27% of saucers |
-| 6 | 7 | 18 px/s | every ~28 s | 36% of saucers |
-| 8 | 9 | 24 px/s | every ~21 s | 47% of saucers |
-| 10+ | 11–12 | 31 px/s | every ~12 s | 60% of saucers |
+| 1 | 3 interceptor | 2 | 52 px/s | 2.5 s |
+| 3 | 4 interceptor, 1 gunship | 3 | 54 px/s | 2.4 s |
+| 5 | 4 interceptor, 2 gunship, **Marauder** | 3 | 58 px/s | 2.2 s |
+| 8 | 7 interceptor, 2 gunship | 4 | 67 px/s | 1.8 s |
+| 10 | 4 interceptor, 3 gunship, **Dreadnought** | 5 | 74 px/s | 1.5 s |
+| 15 | 4 interceptor, 2 gunship, **Marauder** | 6 | 74 px/s | 1.5 s |
+| 20 | 4 interceptor, 3 gunship, **Dreadnought** | 6 | 74 px/s | 1.5 s |
 
-A motionless ship that never fires survives a median 20 s on wave 1, 10 s on
-wave 3, and under 2 s by wave 12.
+Ships arrive a few at a time rather than all at once, at most seven on the
+field. A bot that circles, dodges and grabs magazines reaches a median wave 8
+in about four minutes; the Marauder on wave 5 is the first real wall, and it
+gets past it roughly seven runs in eight.
 
 ## What's in the renderer
 
+- Four hostile hulls — interceptor, gunship, Marauder, Dreadnought — each a
+  set of polylines in local coordinates, so one rotate-and-scale draws any of
+  them at any size and a silhouette is designed as a shape, not as code. Every
+  nozzle trails its own flickering engine bloom, and a capital ship fits
+  itself to the field so it cannot swallow a small terminal
+- Dropped magazines as a slowly rotating hex with the weapon's letter inside,
+  blinking out over their last four seconds
 - Round tumbling asteroid outlines with interior craters, flashing white on the
   frame they're hit
-- Ship drawn as a hull with a three-prong exhaust plume that flickers and grows
-  with throttle, trailing thruster particles
+- Your ship as one unbroken chevron — raked nose, kinked shoulders, wings
+  swept back to a deep tail notch — with a plume off each of three nozzles
+  that flickers and grows with throttle, trailing thruster particles. It is
+  one outline and a spine on purpose: at the size a fighter gets drawn there
+  is only room for a silhouette, and the nacelles and canopy frames that read
+  well on a capital ship fill in solid on a small one
 - Explosions as an expanding shock ring plus a fire-ramp particle burst —
   white → yellow → orange → red → ember as they cool
 - Death breaks the ship into four tumbling line fragments
@@ -144,8 +188,9 @@ wave 3, and under 2 s by wave 12.
 - Three-layer parallax starfield that twinkles and shears against your velocity
 - Bullet motion trails, floating `+50` score pops, screen shake, a scanline
   sweep and an expanding `« WAVE 3 »` banner between waves
-- Framed HUD: score, lives, wave with a pip per remaining rock, high score,
-  flight model, and a `WARP ▰▰▰▱` hyperspace charge meter
+- Framed HUD: score, lives, wave with a pip per ship still to kill, high
+  score, flight model, loaded magazine and rounds left, a `WARP ▰▰▰▱`
+  hyperspace charge meter, and a hull bar across the top while a boss lives
 - Animated attract-mode title screen where a demo ship flies loops and shoots
   up the field behind the logo
 
@@ -181,6 +226,16 @@ Runs 1,500 frames of simulation and rendering headlessly — every game state,
 both flight models, two mid-run resizes — and reports draw cost per frame. It
 writes its save file to a temp path, so your high score is left alone.
 
+```sh
+python3 asteroids.py --keytest
+```
+
+Shows what your terminal actually sends while you hold a key: the delay before
+auto-repeat starts, the rate once it does, and whether either one is out of the
+range the flight model can cope with. Every input constant in `Keys` is a bet
+about those two numbers, so this is the thing to run first when the ship feels
+like it is fighting you.
+
 ### A note on holding keys
 
 Terminals report key presses but never key releases, and the OS auto-repeats
@@ -196,17 +251,40 @@ so both are **measured from your own keyboard**: the first repeat of a held key
 gives the delay, the ones after it give the period, and the two windows are
 sized from those. Holding the Right arrow, then releasing it:
 
+Both numbers have to be learned from a *train* — a short gap arriving right
+behind a long one — and never from a lone gap. Steering taps land 0.2–0.4 s
+apart, which looks exactly like a delay-until-repeat; believing them drags the
+learned delay below the real one, and then every held key stutters. That is a
+mistake worth naming, because it does not show up when you hold a key on a
+fresh keyboard model — only when you hold one *after* playing for a while.
+
+Measured by holding an arrow for 2.5 s, having tapped twenty times first:
+
 | terminal / OS key-repeat | share of the hold spent flying | overrun after release |
 | --- | --- | --- |
 | fast repeat (0.25 s, 30/s) | 100% | 0.32 s |
-| macOS default (0.5 s, 25/s) | 100% | 0.30 s |
-| slow repeat (1.2 s, 10/s) | 100% | 0.50 s |
-| very slow (2.0 s, 6/s) | 97% | 0.35 s |
+| macOS default (0.5 s, 25/s) | 100% | 0.37 s |
+| slow repeat (1.2 s, 10/s) | 79%, then 100% | 0.57 s |
+| very slow (2.0 s, 6/s) | 44% | 0.60 s |
 | repeat disabled — one press | one 0.8 s dash, then a stop | — |
 
-That last row is the honest limit. With auto-repeat switched off there is no
+The slow row costs one stutter while the delay is being measured and is smooth
+from the second hold on. The last two are the honest limits: past a 1.35 s
+delay the game gives up waiting, and with auto-repeat switched off there is no
 information at all after the initial press, so a held arrow reads as a single
-dash. Nothing can fix that from inside a terminal; turn key repeat back on.
+dash. Nothing can fix either from inside a terminal — run `--keytest`, and if
+that is what you see, turn key repeat up.
+
+### Arrow keys are not one key
+
+An arrow is an escape sequence, `27 '[' 'C'`, and with `nodelay` set ncurses
+will hand back a bare `27` rather than block waiting for the rest of it. On the
+terminals where that happens every arrow press arrives as three unknown keys
+and the ship does not move at all — or moves only on the presses that happened
+to be assembled, which from the player's seat is indistinguishable from a very
+bad stutter. So the sequences are re-assembled by hand (`Reader`) instead of
+being trusted to ncurses, with a 50 ms grace period for one that is still
+arriving byte by byte.
 
 Two arrows held at once is the other casualty, since only the newer of them
 repeats: the older one is kept alive at tapering strength for a fraction of a
