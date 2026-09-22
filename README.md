@@ -1,7 +1,7 @@
 # Terminal Space War
 
-A space combat game that runs in your terminal, in a single Python file with
-no dependencies beyond the standard library. You fly one ship against a hostile
+A space combat game that runs in your terminal, in pure Python with no
+dependencies beyond the standard library. You fly one ship against a hostile
 fleet — interceptors, gunships, an unarmed tender that runs from you, and a
 capital ship every fifth wave — and after every tenth wave the fleet jumps to
 a new sector of space with one rule of its own. The asteroids are still there,
@@ -42,12 +42,38 @@ sub-character instead of jumping from cell to cell.
 ## Run
 
 ```sh
-python3 spacewar.py
+python3 play.py        # or: python3 -m spacewar
 ```
 
 Python 3.8+ and any terminal at least 48×16. Bigger window = bigger play
 field. 256 colours are used when available, with an automatic 8-colour
 fallback.
+
+## Layout
+
+The game is a package. Each module imports only from the ones above it, so
+there is no cycle to unpick and any one of them can be read on its own:
+
+| | |
+| --- | --- |
+| [`spacewar/config.py`](spacewar/config.py) | tunables, the bell, the save file, wrap-aware geometry |
+| [`spacewar/colors.py`](spacewar/colors.py) | named curses attributes and the ramps that shade them |
+| [`spacewar/screen.py`](spacewar/screen.py) | the braille pixel buffer and the play field's view of it |
+| [`spacewar/hulls.py`](spacewar/hulls.py) | every ship's silhouette, as polylines |
+| [`spacewar/entities.py`](spacewar/entities.py) | your ship, rocks, rounds, salvage, particles |
+| [`spacewar/fleet.py`](spacewar/fleet.py) | the hostile ships and how each class behaves |
+| [`spacewar/sectors.py`](spacewar/sectors.py) | the rule that changes every tenth wave |
+| [`spacewar/render.py`](spacewar/render.py) | how a `Game` draws itself |
+| [`spacewar/game.py`](spacewar/game.py) | the simulation |
+| [`spacewar/input.py`](spacewar/input.py) | held keys, from a terminal that will not say |
+| [`spacewar/app.py`](spacewar/app.py) | the frame loop |
+| [`spacewar/diagnostics.py`](spacewar/diagnostics.py) | `--selftest` and `--keytest` |
+
+`Game` is split across two files because it is two jobs: `game.py` runs the
+simulation, `render.py` is a mixin holding every method that draws. They are
+one class rather than two objects because the drawing reads the game's own
+state and nothing else — handing a dozen fields across a boundary would buy
+nothing.
 
 ## Controls
 
@@ -353,7 +379,7 @@ draw, leaving the 60 fps loop roughly 4% busy.
 ## Development
 
 ```sh
-python3 spacewar.py --selftest
+python3 play.py --selftest
 ```
 
 Runs 2,600 frames of simulation and rendering headlessly — every game state,
@@ -380,7 +406,7 @@ class's habit, both modes of `Keys`, and every escape sequence `Reader` has
 to decode — legacy arrows, kitty key events, and the terminal's own replies.
 
 ```sh
-python3 spacewar.py --keytest
+python3 play.py --keytest
 ```
 
 Shows what your terminal actually sends while you hold a key: whether it

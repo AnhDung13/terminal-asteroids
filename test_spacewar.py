@@ -6,6 +6,7 @@
 Headless: no terminal is needed, and the save file goes to a temp path.
 """
 import os
+import random
 import tempfile
 import unittest
 
@@ -698,7 +699,7 @@ class ReaderTests(unittest.TestCase):
 
 class LifecycleTests(unittest.TestCase):
     def test_headless_run_stays_consistent(self):
-        ast.random.seed(1)
+        random.seed(1)
         g, k = game(), Keys()
         for i in range(600):
             k.tick(i / 60)
