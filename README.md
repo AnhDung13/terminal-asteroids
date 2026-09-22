@@ -42,7 +42,7 @@ sub-character instead of jumping from cell to cell.
 ## Run
 
 ```sh
-python3 play.py        # or: python3 -m spacewar
+python3 spacewar.py
 ```
 
 Python 3.8+ and any terminal at least 48×16. Bigger window = bigger play
@@ -54,20 +54,20 @@ fallback.
 The game is a package. Each module imports only from the ones above it, so
 there is no cycle to unpick and any one of them can be read on its own:
 
-| | |
-| --- | --- |
-| [`spacewar/config.py`](spacewar/config.py) | tunables, the bell, the save file, wrap-aware geometry |
-| [`spacewar/colors.py`](spacewar/colors.py) | named curses attributes and the ramps that shade them |
-| [`spacewar/screen.py`](spacewar/screen.py) | the braille pixel buffer and the play field's view of it |
-| [`spacewar/hulls.py`](spacewar/hulls.py) | every ship's silhouette, as polylines |
-| [`spacewar/entities.py`](spacewar/entities.py) | your ship, rocks, rounds, salvage, particles |
-| [`spacewar/fleet.py`](spacewar/fleet.py) | the hostile ships and how each class behaves |
-| [`spacewar/sectors.py`](spacewar/sectors.py) | the rule that changes every tenth wave |
-| [`spacewar/render.py`](spacewar/render.py) | how a `Game` draws itself |
-| [`spacewar/game.py`](spacewar/game.py) | the simulation |
-| [`spacewar/input.py`](spacewar/input.py) | held keys, from a terminal that will not say |
-| [`spacewar/app.py`](spacewar/app.py) | the frame loop |
-| [`spacewar/diagnostics.py`](spacewar/diagnostics.py) | `--selftest` and `--keytest` |
+|                                                      |                                                          |
+| ---------------------------------------------------- | -------------------------------------------------------- |
+| [`spacewar/config.py`](spacewar/config.py)           | tunables, the bell, the save file, wrap-aware geometry   |
+| [`spacewar/colors.py`](spacewar/colors.py)           | named curses attributes and the ramps that shade them    |
+| [`spacewar/screen.py`](spacewar/screen.py)           | the braille pixel buffer and the play field's view of it |
+| [`spacewar/hulls.py`](spacewar/hulls.py)             | every ship's silhouette, as polylines                    |
+| [`spacewar/entities.py`](spacewar/entities.py)       | your ship, rocks, rounds, salvage, particles             |
+| [`spacewar/fleet.py`](spacewar/fleet.py)             | the hostile ships and how each class behaves             |
+| [`spacewar/sectors.py`](spacewar/sectors.py)         | the rule that changes every tenth wave                   |
+| [`spacewar/render.py`](spacewar/render.py)           | how a `Game` draws itself                                |
+| [`spacewar/game.py`](spacewar/game.py)               | the simulation                                           |
+| [`spacewar/input.py`](spacewar/input.py)             | held keys, from a terminal that will not say             |
+| [`spacewar/app.py`](spacewar/app.py)                 | the frame loop                                           |
+| [`spacewar/diagnostics.py`](spacewar/diagnostics.py) | `--selftest` and `--keytest`                             |
 
 `Game` is split across two files because it is two jobs: `game.py` runs the
 simulation, `render.py` is a mixin holding every method that draws. They are
@@ -77,19 +77,19 @@ nothing.
 
 ## Controls
 
-| Key | Action |
-| --- | --- |
-| `↑ ↓ ← →` / `WASD` | hold to fly (arcade) · turn, thrust, retro-burn (classic) |
-| `Y` `U` `B` `N` | one-key diagonals: up-left, up-right, down-left, down-right |
-| `7` `9` `1` `3` | the same four diagonals, on the keypad |
-| `Space` | launch, from the title screen or after a game over |
-| `0` `.` `,` `5` | all stop |
-| `X` | hyperspace: jump somewhere else, 3s cooldown |
-| `Z` | fire a held bomb: every hostile round gone, every hull hurt |
-| `M` | switch flight model |
-| `P` | pause |
-| `R` | restart |
-| `Q` | quit |
+| Key                | Action                                                      |
+| ------------------ | ----------------------------------------------------------- |
+| `↑ ↓ ← →` / `WASD` | hold to fly (arcade) · turn, thrust, retro-burn (classic)   |
+| `Y` `U` `B` `N`    | one-key diagonals: up-left, up-right, down-left, down-right |
+| `7` `9` `1` `3`    | the same four diagonals, on the keypad                      |
+| `Space`            | launch, from the title screen or after a game over          |
+| `0` `.` `,` `5`    | all stop                                                    |
+| `X`                | hyperspace: jump somewhere else, 3s cooldown                |
+| `Z`                | fire a held bomb: every hostile round gone, every hull hurt |
+| `M`                | switch flight model                                         |
+| `P`                | pause                                                       |
+| `R`                | restart                                                     |
+| `Q`                | quit                                                        |
 
 ## Two flight models
 
@@ -120,12 +120,12 @@ Press `M` any time to swap. Your choice and your high score persist in
 ## The gun
 
 **You do not press anything to shoot.** The gun runs on its own for as long as
-you are alive — but it does *not* aim itself. The nose follows the way you are
+you are alive — but it does _not_ aim itself. The nose follows the way you are
 flying, so where you point the ship is where the rounds go, and stopping
 leaves the nose on its last heading, still firing along it. Flying is aiming.
 
 Automatic fire is not a convenience here, it is the only thing that works. A
-terminal auto-repeats only the *most recently pressed* key, so a held `Space`
+terminal auto-repeats only the _most recently pressed_ key, so a held `Space`
 falls silent the instant you touch an arrow — any gun bound to a key cuts out
 every time you steer, which is exactly when you need it. A gun with no key has
 nothing to interrupt.
@@ -137,16 +137,16 @@ rather than a trigger pull.
 
 ## Scoring
 
-| Target | Hull | Points |
-| --- | --- | --- |
-| Large asteroid | 1 | 20 |
-| Medium asteroid | 1 | 50 |
-| Small asteroid | 1 | 100 |
-| Interceptor — fast, darts and circles | 1 | 150 |
-| Gunship — twin nacelles, fires pairs | 2 | 400 |
-| Tender — unarmed hauler, runs, and jumps out if you let it | 3 | 600 |
-| **Marauder** — mini boss, every 5th wave | 11 | 2,500 |
-| **Dreadnought** — boss, every 10th wave | 28 | 12,000 |
+| Target                                                     | Hull | Points |
+| ---------------------------------------------------------- | ---- | ------ |
+| Large asteroid                                             | 1    | 20     |
+| Medium asteroid                                            | 1    | 50     |
+| Small asteroid                                             | 1    | 100    |
+| Interceptor — fast, darts and circles                      | 1    | 150    |
+| Gunship — twin nacelles, fires pairs                       | 2    | 400    |
+| Tender — unarmed hauler, runs, and jumps out if you let it | 3    | 600    |
+| **Marauder** — mini boss, every 5th wave                   | 11   | 2,500  |
+| **Dreadnought** — boss, every 10th wave                    | 28   | 12,000 |
 
 Your shots burn out when they reach the edge of the field rather than wrapping
 around it, and their range scales with your window, so a shot always crosses
@@ -162,7 +162,7 @@ only dents it. Game over reports your score, waves survived, shooting accuracy
 and your longest chain.
 
 **Rocks are ammunition.** When one of your shots splits a rock, the two
-fragments fly off *along the shot* — fast, hot, drawn in fire colours with a
+fragments fly off _along the shot_ — fast, hot, drawn in fire colours with a
 streak behind them — and for a second and a half a hot fragment hurts the first
 hull it meets: three hull points for a large fragment, two for a medium, one
 for a small. The fragment shatters on impact and scores its own points on the
@@ -193,13 +193,13 @@ resetting it.
 Your own gun fires five rounds a second, and every magazine is quoted against
 that:
 
-| | Magazine | Effect |
-| --- | --- | --- |
-| **S** SPREAD | 55 | a fan of three, 4.2 shots/s |
-| **R** RAPID | 150 | one bolt at 14 shots/s |
-| **P** LANCE | 60 | passes through hulls and keeps going, 5 shots/s |
-| **H** SEEKER | 55 | curves onto the nearest ship on its own, 3.6 shots/s |
-| **G** GAUSS | 26 | three hull points a slug, 2.5 shots/s |
+|              | Magazine | Effect                                               |
+| ------------ | -------- | ---------------------------------------------------- |
+| **S** SPREAD | 55       | a fan of three, 4.2 shots/s                          |
+| **R** RAPID  | 150      | one bolt at 14 shots/s                               |
+| **P** LANCE  | 60       | passes through hulls and keeps going, 5 shots/s      |
+| **H** SEEKER | 55       | curves onto the nearest ship on its own, 3.6 shots/s |
+| **G** GAUSS  | 26       | three hull points a slug, 2.5 shots/s                |
 
 GAUSS drops a gunship in one and a Marauder in four; SEEKER is the one weapon
 that aims for you, so it is worth breaking off for. The catch is that a
@@ -208,11 +208,11 @@ gets you killed.
 
 ### Gear
 
-| | Gear | Effect |
-| --- | --- | --- |
-| **O** SHIELD | half of gear drops | a ring round the hull that eats one hit, then is gone |
-| **\*** BOMB | a third | held, up to three; `Z` clears every hostile round and deals 4 hull to every ship on screen |
-| **+** EXTRA SHIP | the rest | one more life |
+|                  | Gear               | Effect                                                                                     |
+| ---------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| **O** SHIELD     | half of gear drops | a ring round the hull that eats one hit, then is gone                                      |
+| **\*** BOMB      | a third            | held, up to three; `Z` clears every hostile round and deals 4 hull to every ship on screen |
+| **+** EXTRA SHIP | the rest           | one more life                                                                              |
 
 A bomb kills any escort outright and takes a Marauder down a third; on a
 Dreadnought it is the thing that gets you out from under a ring of fire. The
@@ -226,7 +226,7 @@ you. Beyond that, each class has one habit of its own:
 
 - **Interceptor** — shoots at where you are. Fast, fragile, and there are a
   lot of them.
-- **Gunship** — shoots at where you are *going to be*: it leads its pairs by
+- **Gunship** — shoots at where you are _going to be_: it leads its pairs by
   your velocity over the round's flight time, so flying in a straight line
   past one is how you get hit. Change course after it fires.
 - **Marauder** — circles for a few seconds, then breaks orbit and runs
@@ -243,7 +243,7 @@ you. Beyond that, each class has one habit of its own:
   round the hull fills in as the charge builds and blinks over the last
   seconds, and a `TENDER JUMP` bar on the frame line shows the same thing.
   Twelve seconds after it arrives (nine by wave 10) it is gone. Catch it and
-  it always drops two pieces of salvage; let it go and the *next* wave comes
+  it always drops two pieces of salvage; let it go and the _next_ wave comes
   with one more gunship in its escort. It is slower than you, but it is never
   where the fight is, so the whole time you are chasing it the fight is
   behind you.
@@ -252,7 +252,7 @@ you. Beyond that, each class has one habit of its own:
 dreadnought's spinal battery — shows where the volley is going for the last
 three tenths of a second before it fires: a faint grey cross at the aim point,
 drawn under everything else. It is not a reticle for you to use. It is there
-so the rule *change course after it shoots* can be learned by watching rather
+so the rule _change course after it shoots_ can be learned by watching rather
 than by dying, and once you have learned it you stop seeing it.
 
 ## Difficulty
@@ -260,15 +260,15 @@ than by dying, and once you have learned it you stop seeing it.
 Wave 1 is three interceptors and two drifting rocks. One eased dial then ramps
 the fleet through wave 10 — how many ships, how fast, and how often they fire.
 
-| Wave | Fleet | Rocks | Interceptor speed | Volley gap |
-| --- | --- | --- | --- | --- |
-| 1 | 3 interceptor | 2 | 52 px/s | 1.9 s |
-| 3 | 4 interceptor, 1 gunship | 3 | 54 px/s | 1.8 s |
-| 5 | 4 interceptor, 2 gunship, **Marauder** | 3 | 58 px/s | 1.7 s |
-| 8 | 7 interceptor, 2 gunship | 4 | 67 px/s | 1.5 s |
-| 10 | 4 interceptor, 3 gunship, **Dreadnought** | 5 | 74 px/s | 1.2 s |
-| 15 | 4 interceptor, 2 gunship, **Marauder** | 6 | 74 px/s | 1.2 s |
-| 20 | 4 interceptor, 3 gunship, **Dreadnought** | 6 | 74 px/s | 1.2 s |
+| Wave | Fleet                                     | Rocks | Interceptor speed | Volley gap |
+| ---- | ----------------------------------------- | ----- | ----------------- | ---------- |
+| 1    | 3 interceptor                             | 2     | 52 px/s           | 1.9 s      |
+| 3    | 4 interceptor, 1 gunship                  | 3     | 54 px/s           | 1.8 s      |
+| 5    | 4 interceptor, 2 gunship, **Marauder**    | 3     | 58 px/s           | 1.7 s      |
+| 8    | 7 interceptor, 2 gunship                  | 4     | 67 px/s           | 1.5 s      |
+| 10   | 4 interceptor, 3 gunship, **Dreadnought** | 5     | 74 px/s           | 1.2 s      |
+| 15   | 4 interceptor, 2 gunship, **Marauder**    | 6     | 74 px/s           | 1.2 s      |
+| 20   | 4 interceptor, 3 gunship, **Dreadnought** | 6     | 74 px/s           | 1.2 s      |
 
 A class fires at its quoted gap from wave 1 and closes to two thirds of it by
 wave 10. Those gaps are per ship, and jittered ±20% on each reload, so what
@@ -289,7 +289,7 @@ keeps running through it; nothing hostile does.
 
 ## Sectors
 
-The difficulty dial above is flat from wave 10. From there the *sector* is what
+The difficulty dial above is flat from wave 10. From there the _sector_ is what
 changes: after every dreadnought the fleet jumps and you follow, into a region
 of space with one rule of its own. The first ten waves are open space. The four
 rules after that come round in a different order every run, so wave 11 is a
@@ -297,16 +297,16 @@ fresh problem each time and the whole cycle takes forty waves. Salvage comes
 with you through a jump — it is cargo now — but the rocks stay behind, and so
 does anything the fleet had in the air.
 
-| Sector | The rule |
-| --- | --- |
-| **OPEN SPACE** | waves 1–10: the fleet, the rocks, and you |
-| **NEBULA** | sensors reach about a third of the way across the field, and a faint ring round your ship shows how far. Past it a hostile ship is a blinking dot in its own colour, its rounds are the faintest specks, and a rock is a dim outline. Your own shots you can always see. The star field goes violet |
-| **DEBRIS FIELD** | twice the rocks plus two, a quarter larger, and a fresh boulder drifts in off an edge every four seconds for as long as the field is short. More cover, more weather, and a great deal more ammunition |
-| **MINEFIELD** | four to nine proximity mines adrift across the field, blinking. Any hull within eleven pixels sets one off — yours or theirs — and so does one of your shots. The blast reaches thirty-four pixels, does three hull points to every ship inside it, kills you if you are inside it, and sets off any mine inside it too. The fleet's rounds pass straight through a mine: a minefield that cleared itself would be scenery. Shooting one out from under a gunship is the whole idea |
+| Sector           | The rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **OPEN SPACE**   | waves 1–10: the fleet, the rocks, and you                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **NEBULA**       | sensors reach about a third of the way across the field, and a faint ring round your ship shows how far. Past it a hostile ship is a blinking dot in its own colour, its rounds are the faintest specks, and a rock is a dim outline. Your own shots you can always see. The star field goes violet                                                                                                                                                                                                                                                                                                                                                            |
+| **DEBRIS FIELD** | twice the rocks plus two, a quarter larger, and a fresh boulder drifts in off an edge every four seconds for as long as the field is short. More cover, more weather, and a great deal more ammunition                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **MINEFIELD**    | four to nine proximity mines adrift across the field, blinking. Any hull within eleven pixels sets one off — yours or theirs — and so does one of your shots. The blast reaches thirty-four pixels, does three hull points to every ship inside it, kills you if you are inside it, and sets off any mine inside it too. The fleet's rounds pass straight through a mine: a minefield that cleared itself would be scenery. Shooting one out from under a gunship is the whole idea                                                                                                                                                                            |
 | **GRAVITY WELL** | a star at the centre of the field pulls on everything that moves — rocks, rounds, salvage, the fleet and you — with an inverse-square field, capped so that a close pass is survivable and a straight line into it is not. Touch it and you are gone, though a shield throws you clear instead. Shots bend round it. Rocks and salvage that fall in flare and are lost; a hostile ship that falls in is your kill, chain and all, though its cargo burns. The fleet steers round it, hard — but a Marauder's charge does not steer, and a dreadnought's standoff orbit is wider than the field. You respawn above it, and hyperspace will never drop you in it |
 
 In arcade flight the keys command a velocity, so a pull on that velocity would
-be undone within a few frames; the star drags the *hull* instead, as a current
+be undone within a few frames; the star drags the _hull_ instead, as a current
 you fly against. In classic flight it is plain acceleration, and there are
 still no brakes.
 
@@ -379,7 +379,7 @@ draw, leaving the 60 fps loop roughly 4% busy.
 ## Development
 
 ```sh
-python3 play.py --selftest
+python3 spacewar.py --selftest
 ```
 
 Runs 2,600 frames of simulation and rendering headlessly — every game state,
@@ -406,7 +406,7 @@ class's habit, both modes of `Keys`, and every escape sequence `Reader` has
 to decode — legacy arrows, kitty key events, and the terminal's own replies.
 
 ```sh
-python3 play.py --keytest
+python3 spacewar.py --keytest
 ```
 
 Shows what your terminal actually sends while you hold a key: whether it
@@ -426,48 +426,48 @@ the terminal whether it speaks it (`CSI ? u`, chased with a device-attributes
 query so an unsupporting terminal still answers promptly), and if so pushes
 the flags for press/repeat/release reporting and pops them on exit. From then
 on every key arrives as a sequence with an event type on it, `Reader` decodes
-them alongside the legacy arrows, and `Keys` runs in *exact* mode: a direction
+them alongside the legacy arrows, and `Keys` runs in _exact_ mode: a direction
 is held while any key mapped to it is down, full stop. Reversing still
 cancels — the newer of two opposed arrows wins while both are down, and control
 passes back when it is released — because rolling from one arrow to the other
 always overlaps them for a moment, and a dead stop there feels like a broken
 key. The one guard left is for a release that never arrives (focus lost
-mid-hold): the *most recently pressed* key, on a terminal that has shown it
+mid-hold): the _most recently pressed_ key, on a terminal that has shown it
 repeats held keys, is dropped if it goes quiet for far longer than any repeat
 period. Only the newest press, because the OS repeats only that one — an
 older arrow held under a newer key, or under a tap of `X`, goes quiet while
 still very much held. Everything below is about terminals without it.
 
 Classic terminals report key presses but never key releases, and the OS
-auto-repeats only the *most recently pressed* key. Worse, the delay before that
+auto-repeats only the _most recently pressed_ key. Worse, the delay before that
 repeat train starts is a user setting — and for some setups arrows do not
 repeat at all.
 
 So a release has to be inferred, and the whole flight model comes down to two
-numbers: how long a *fresh* press stays live (it has to outlast the delay
-before repeats start, or the ship stutters) and how long each *repeat* keeps it
+numbers: how long a _fresh_ press stays live (it has to outlast the delay
+before repeats start, or the ship stutters) and how long each _repeat_ keeps it
 alive after that (which is exactly how long the ship overruns when you do let
 go). Guessing either one badly ruins the model in one direction or the other,
 so both are **measured from your own keyboard**: the first repeat of a held key
 gives the delay, the ones after it give the period, and the two windows are
 sized from those. Holding the Right arrow, then releasing it:
 
-Both numbers have to be learned from a *train* — a short gap arriving right
+Both numbers have to be learned from a _train_ — a short gap arriving right
 behind a long one — and never from a lone gap. Steering taps land 0.2–0.4 s
 apart, which looks exactly like a delay-until-repeat; believing them drags the
 learned delay below the real one, and then every held key stutters. That is a
 mistake worth naming, because it does not show up when you hold a key on a
-fresh keyboard model — only when you hold one *after* playing for a while.
+fresh keyboard model — only when you hold one _after_ playing for a while.
 
 Measured by holding an arrow for 2.5 s, having tapped twenty times first:
 
-| terminal / OS key-repeat | share of the hold spent flying | overrun after release |
-| --- | --- | --- |
-| fast repeat (0.25 s, 30/s) | 100% | 0.32 s |
-| macOS default (0.5 s, 25/s) | 100% | 0.37 s |
-| slow repeat (1.2 s, 10/s) | 79%, then 100% | 0.57 s |
-| very slow (2.0 s, 6/s) | 44% | 0.60 s |
-| repeat disabled — one press | one 0.8 s dash, then a stop | — |
+| terminal / OS key-repeat    | share of the hold spent flying | overrun after release |
+| --------------------------- | ------------------------------ | --------------------- |
+| fast repeat (0.25 s, 30/s)  | 100%                           | 0.32 s                |
+| macOS default (0.5 s, 25/s) | 100%                           | 0.37 s                |
+| slow repeat (1.2 s, 10/s)   | 79%, then 100%                 | 0.57 s                |
+| very slow (2.0 s, 6/s)      | 44%                            | 0.60 s                |
+| repeat disabled — one press | one 0.8 s dash, then a stop    | —                     |
 
 The slow row costs one stutter while the delay is being measured and is smooth
 from the second hold on. The last two are the honest limits: past a 1.35 s
@@ -493,7 +493,7 @@ second and then fades. `Y U B N` are the reliable way to hold a diagonal,
 because a single held key is the one thing that does repeat predictably.
 
 **The gun sidesteps all of it by latching.** The arrow you press to dodge is
-*always* more recent than the `Space` you are holding, so a gun that fires once
+_always_ more recent than the `Space` you are holding, so a gun that fires once
 per keypress goes silent every single time you steer — you cannot fly and shoot
 at once. A latch has no window to expire and nothing to interrupt: `Space` arms
 it, `Space` disarms it, and steering never touches it.
