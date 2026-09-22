@@ -14,8 +14,8 @@ os.environ["SPACEWAR_STATE"] = os.path.join(tempfile.gettempdir(),
                                             ".spacewar_test_state")
 
 import curses                                                   # noqa: E402
-import spacewar as ast                                          # noqa: E402
-from spacewar import (Game, Keys, Reader, Bullet, Raider, Ship,    # noqa: E402
+import game as ast                                          # noqa: E402
+from game import (Game, Keys, Reader, Bullet, Raider, Ship,    # noqa: E402
                       Asteroid, Mine, Sun, SECTORS, SECTOR_CYCLE,
                       PRESS, REPEAT, RELEASE)
 

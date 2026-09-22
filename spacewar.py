@@ -6,7 +6,7 @@ does exactly the same thing. This exists because `python3 <something>.py` is
 the command people already have in their fingers.
 """
 
-from spacewar.__main__ import main
+from game.__main__ import main
 
 if __name__ == "__main__":
     main()
