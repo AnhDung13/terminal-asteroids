@@ -37,11 +37,25 @@ def run(stdscr):
         tty_write(KITTY_POP)
 
 
+def cramped_notice(stdscr, w, h):
+    """The terminal has been shrunk under the minimum: say so, instead of
+    drawing a frame that no longer fits."""
+    stdscr.erase()
+    for i, line in enumerate(("SPACE WAR", "needs %dx%d" % (MIN_W, MIN_H),
+                              "this is %dx%d" % (w, h), "", "paused")):
+        if i < h:
+            try:
+                stdscr.addstr(i, 0, line[:max(0, w - 1)])
+            except curses.error:
+                pass
+
+
 def loop(stdscr, game, keys, reader):
     prev_state = game.state
     now = time.perf_counter()
     last = now
     frame = 1.0 / FPS
+    cramped = None          # (w, h) while the terminal is below the minimum
     while True:
         now = time.perf_counter()
         dt = min(now - last, 0.06)
@@ -53,6 +67,14 @@ def loop(stdscr, game, keys, reader):
                 if w >= MIN_W and h >= MIN_H:
                     game.resize(w, h)
                     stdscr.erase()
+                    cramped = None
+                else:
+                    # Too small to play in. Hold the game where it is - a
+                    # ship lost to a window you were dragging is not a fair
+                    # death - and wait for room.
+                    cramped = (w, h)
+                    if game.state == "play":
+                        game.state = "paused"
                 continue
             if c in KEYMAP:
                 keys.press(KEYMAP[c], now, ev)
@@ -106,7 +128,10 @@ def loop(stdscr, game, keys, reader):
             prev_state = game.state
         keys.tick(now)
         game.advance(dt, keys)
-        game.draw(stdscr)
+        if cramped:
+            cramped_notice(stdscr, *cramped)
+        else:
+            game.draw(stdscr)
         stdscr.noutrefresh()
         curses.doupdate()
 

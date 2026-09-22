@@ -15,6 +15,7 @@ os.environ["SPACEWAR_STATE"] = os.path.join(tempfile.gettempdir(),
                                             ".spacewar_test_state")
 
 import curses                                                   # noqa: E402
+import math                                                     # noqa: E402
 import game as ast                                          # noqa: E402
 from game import (Game, Keys, Reader, Bullet, Raider, Ship,    # noqa: E402
                       Asteroid, Mine, Sun, SECTORS, SECTOR_CYCLE,
@@ -814,6 +815,144 @@ class SectorTests(unittest.TestCase):
         for _ in range(4 * 120):
             f.update(1 / 120, w, s, [], sun)
             self.assertFalse(sun.inside(f.x, f.y, w))
+
+
+class FitTests(unittest.TestCase):
+    """A small terminal plays the designed field, zoomed; a big one plays a
+    bigger field at zoom 1. The fight's distances never change with the
+    window - only the dots that draw them."""
+
+    def test_design_size_and_up_are_not_zoomed(self):
+        g = Game(110, 34)
+        self.assertEqual(g.fit, 1.0)
+        self.assertEqual(g.world, (216, 128))
+        g = Game(160, 46)
+        self.assertEqual(g.fit, 1.0)
+        self.assertEqual(g.world, (316, 176))
+
+    def test_small_terminal_keeps_the_field_and_zooms_out(self):
+        g = Game(48, 16)
+        self.assertLess(g.fit, 1.0)
+        self.assertGreaterEqual(g.fit, ast.config.FIT_MIN)
+        self.assertAlmostEqual(g.world[0] * g.fit, 92, delta=1.0)
+        self.assertAlmostEqual(g.world[1] * g.fit, 56, delta=1.0)
+        # a gunship's standoff now fits on the screen
+        half = math.hypot(*g.world) / 2
+        self.assertGreater(half, Raider.SPECS["gunship"]["keep"])
+
+    def test_minimum_terminal_hits_the_floor(self):
+        g = Game(ast.MIN_W, ast.MIN_H)
+        self.assertEqual(g.fit, ast.config.FIT_MIN)
+
+    def test_resize_moves_between_zoom_levels(self):
+        g = game()
+        g.resize(48, 16)
+        self.assertLess(g.fit, 1.0)
+        for o in g.movers():
+            self.assertTrue(0 <= o.x < g.world[0] and 0 <= o.y < g.world[1])
+        g.resize(110, 34)
+        self.assertEqual(g.fit, 1.0)
+
+    def test_field_zoom_maps_units_to_dots(self):
+        sc = ast.Screen(48, 16)
+        f = ast.Field(sc, 1, 1, 184, 112, zoom=0.5)
+        f.dot(183, 111)                    # last unit -> last dot -> cell
+        self.assertTrue(sc.pat[14][46])
+        f.dot(184, 112)                    # wraps to the first cell
+        self.assertTrue(sc.pat[1][1])
+        f.dot(0, 0)
+        self.assertEqual(sc.pat[1][1] & 0x01, 0x01)
+
+    def test_zoomed_line_covers_each_dot_once(self):
+        sc = ast.Screen(48, 16)
+        f = ast.Field(sc, 1, 1, 184, 112, zoom=0.5)
+        f.line(0, 0, 20, 0)                # 20 units = 10 dots = 5 cells
+        lit = [x for x in range(48) if sc.pat[1][x]]
+        self.assertEqual(lit, [1, 2, 3, 4, 5, 6])
+
+    def test_gunship_reaches_its_standoff_on_a_small_terminal(self):
+        g = Game(48, 16)
+        g.start_game()
+        g.foes, g.queue, g.spawn_cd = [], ["scout"], 99.0
+        g.asteroids, g.pickups = [], []
+        g.ship.x, g.ship.y = g.world[0] / 2, g.world[1] / 2
+        gun = Raider("gunship", 5, 5, 0.0, g.world)
+        gun.arrive = 0
+        g.foes = [gun]
+        k = Keys()
+        for i in range(8 * 60):
+            g.ship.vx = g.ship.vy = 0.0
+            g.ship.invuln = 9.0
+            g.update(1 / 60, k)
+            if gun not in g.foes:
+                break
+        d = g.wrap_dist(gun.x, gun.y, g.ship.x, g.ship.y)
+        self.assertLess(abs(d - gun.keep), 30)
+
+    def test_small_terminal_renders_every_state(self):
+        for w, h in ((ast.MIN_W, ast.MIN_H), (48, 16), (60, 20)):
+            g = Game(w, h)
+            g.render()
+            g.start_game()
+            g.render()
+            g.state = "paused"
+            g.render()
+            g.state = "over"
+            g.render()
+
+
+class DialHitboxTests(unittest.TestCase):
+    """The size dial is a hitbox dial too: every radius a hull is tested at
+    moves with it, in the same proportion, or the dial makes the game less
+    forgiving while looking more so."""
+
+    def setUp(self):
+        # Game() re-applies the dial saved in the state file, so a test that
+        # reasons about the default has to start from a default file.
+        with open(ast.config.STATE_FILE, "w") as fh:
+            fh.write("0 arcade 1.00\n")
+        ast.scale.apply(1.0)
+
+    def tearDown(self):
+        ast.scale.apply(1.0)
+
+    def test_every_hit_radius_follows_the_dial(self):
+        ast.scale.apply(1.0)
+        full = (Ship.RADIUS, Bullet.R, ast.Pickup.R, Mine.R, Mine.TRIG,
+                ast.Asteroid.SPECS[1][0], Raider.SPECS["scout"]["r"])
+        ast.scale.apply(0.5)
+        half = (Ship.RADIUS, Bullet.R, ast.Pickup.R, Mine.R, Mine.TRIG,
+                ast.Asteroid.SPECS[1][0], Raider.SPECS["scout"]["r"])
+        for a, b in zip(full, half):
+            self.assertAlmostEqual(b, a * 0.5)
+
+    def test_dial_is_reversible(self):
+        before = (Ship.RADIUS, Mine.TRIG, ast.Asteroid.SPECS[3][0])
+        for v in (0.5, 1.4, 0.7, 1.0):
+            ast.scale.apply(v)
+        self.assertEqual((Ship.RADIUS, Mine.TRIG, ast.Asteroid.SPECS[3][0]),
+                         before)
+
+    def test_round_that_misses_the_hull_misses_at_half_size_too(self):
+        g = game()
+        g.foes, g.queue, g.spawn_cd = [], ["scout"], 99.0
+        g.asteroids, g.mines = [], []
+        s = g.ship
+        s.invuln = 0.0
+        ast.scale.apply(0.5)
+        # a round just outside the halved hit disc, at rest
+        miss = Ship.RADIUS + Bullet.R + 0.3
+        g.bullets = [Bullet(s.x + miss, s.y, 0, 0, 5, hostile=True)]
+        g.collisions()
+        self.assertIsNotNone(g.ship)
+        g.bullets = [Bullet(s.x + miss - 0.6, s.y, 0, 0, 5, hostile=True)]
+        g.collisions()
+        self.assertIsNone(g.ship)
+
+    def test_zoom_does_not_touch_hitboxes(self):
+        r0 = (Ship.RADIUS, Bullet.R, Mine.TRIG)
+        Game(48, 16)
+        self.assertEqual((Ship.RADIUS, Bullet.R, Mine.TRIG), r0)
 
 
 class RaiderTests(unittest.TestCase):

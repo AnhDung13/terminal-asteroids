@@ -41,12 +41,28 @@ class Game(GameRender):
 
     # -- geometry ---------------------------------------------------------
     def layout(self, w, h):
+        """Size the field to the terminal - or, on a small terminal, size
+        the terminal's dots to the field.
+
+        The field is never smaller than the designed one. A terminal with
+        fewer dots than that gets the same field drawn at a zoom below 1,
+        so a gunship's standoff still fits on the screen, a mine's blast is
+        still a fraction of it, and a round still takes as long to cross it.
+        A terminal with more dots gets more field, at zoom 1, as before.
+        """
         self.sw, self.sh = w, h
         self.cell_x, self.cell_y = 1, 1
-        self.world = ((w - 2) * PX, (h - 2) * PY)
+        dots_w, dots_h = (w - 2) * PX, (h - 2) * PY
+        self.fit = min(1.0, dots_w / config.DESIGN_W, dots_h / config.DESIGN_H)
+        self.fit = max(config.FIT_MIN, self.fit)
+        self.world = (int(round(dots_w / self.fit)),
+                      int(round(dots_h / self.fit)))
 
     def star_count(self):
-        return max(24, int(self.world[0] * self.world[1] / 900))
+        # Density is per dot, not per unit: a zoomed-out field would
+        # otherwise pack four times the stars into the same screen.
+        dots = self.world[0] * self.world[1] * self.fit * self.fit
+        return max(24, int(dots / 900))
 
     def resize(self, w, h):
         old = self.world

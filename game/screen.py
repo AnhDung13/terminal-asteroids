@@ -88,28 +88,45 @@ class Screen:
 
 
 class Field:
-    """Pixel-space view of the play area. Coordinates wrap at its own edges."""
+    """The play area as the simulation sees it, drawn onto the screen.
 
-    def __init__(self, screen, cell_x, cell_y, w, h):
+    Coordinates are in field units and wrap at the field's own edges. `zoom`
+    is how many dots one unit gets: 1.0 on any terminal big enough for the
+    designed field, less on a small one, where the same field is drawn onto
+    fewer dots. Everything that takes a unit measurement - a radius, an arc
+    step, a text position - goes through here, so nothing upstream needs to
+    know how many dots it has been given.
+    """
+
+    def __init__(self, screen, cell_x, cell_y, w, h, zoom=1.0):
         self.s = screen
         self.x0 = cell_x * PX
         self.y0 = cell_y * PY
         self.cx0, self.cy0 = cell_x, cell_y
-        self.w, self.h = w, h
+        self.w, self.h = w, h                    # field units
+        self.z = zoom
+        self.pw = max(1, int(round(w * zoom)))   # dots
+        self.ph = max(1, int(round(h * zoom)))
+
+    def _dot(self, px, py, attr, prio):
+        """A dot in dot space, wrapped at the drawn field's edges."""
+        self.s.dot(px % self.pw + self.x0, py % self.ph + self.y0, attr, prio)
 
     def dot(self, x, y, attr=0, prio=1):
-        self.s.dot(int(x) % self.w + self.x0, int(y) % self.h + self.y0,
-                   attr, prio)
+        self._dot(int(x * self.z), int(y * self.z), attr, prio)
 
     def line(self, x0, y0, x1, y1, attr=0, prio=1):
-        x0, y0 = int(round(x0)), int(round(y0))
-        x1, y1 = int(round(x1)), int(round(y1))
+        # Endpoints go to dot space first, then Bresenham runs there: a line
+        # is drawn once per dot it covers, however many units that is.
+        z = self.z
+        x0, y0 = int(round(x0 * z)), int(round(y0 * z))
+        x1, y1 = int(round(x1 * z)), int(round(y1 * z))
         dx, dy = abs(x1 - x0), abs(y1 - y0)
         sx = 1 if x0 < x1 else -1
         sy = 1 if y0 < y1 else -1
         err = dx - dy
         while True:
-            self.dot(x0, y0, attr, prio)
+            self._dot(x0, y0, attr, prio)
             if x0 == x1 and y0 == y1:
                 return
             e2 = 2 * err
@@ -127,13 +144,15 @@ class Field:
             self.line(x0, y0, x1, y1, attr, prio)
 
     def arc(self, cx, cy, r, attr=0, prio=1, step=1.1, a0=0.0, a1=TAU):
-        n = max(6, int((a1 - a0) * r / step))
+        # `step` is the spacing between dots, in dots: the count follows the
+        # drawn radius, so a ring is as dense at half zoom as at full.
+        n = max(6, int((a1 - a0) * r * self.z / step))
         for i in range(n):
             a = a0 + (a1 - a0) * i / n
             self.dot(cx + r * math.cos(a), cy + r * math.sin(a), attr, prio)
 
     def ellipse(self, cx, cy, rx, ry, attr=0, prio=1, step=1.0):
-        n = max(10, int(TAU * max(rx, ry) / step))
+        n = max(10, int(TAU * max(rx, ry) * self.z / step))
         for i in range(n):
             a = TAU * i / n
             self.dot(cx + rx * math.cos(a), cy + ry * math.sin(a), attr, prio)
@@ -144,8 +163,8 @@ class Field:
         Clamped rather than wrapped: a score pop split across both edges of
         the screen reads as garbage.
         """
-        cols = self.w // PX
-        cx = int(x) % self.w // PX - len(s) // 2
+        cols = self.pw // PX
+        cx = int(x * self.z) % self.pw // PX - len(s) // 2
         cx = max(0, min(cols - len(s), cx))
-        cy = int(y) % self.h // PY
+        cy = int(y * self.z) % self.ph // PY
         self.s.text(cx + self.cx0, cy + self.cy0, s, attr)

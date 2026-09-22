@@ -45,9 +45,20 @@ sub-character instead of jumping from cell to cell.
 python3 spacewar.py
 ```
 
-Python 3.8+ and any terminal at least 48×16. Bigger window = bigger play
+Python 3.8+ and any terminal at least 40×12. Bigger window = bigger play
 field. 256 colours are used when available, with an automatic 8-colour
 fallback.
+
+**Small terminals play the same game.** The field was designed on a 110×34
+terminal, and below that size the game does not shrink the field — it draws
+the same field with fewer dots. A gunship keeps the same standoff, a mine's
+blast covers the same fraction of the screen, a round takes the same second to
+cross it; the ships are just drawn smaller, down to half size at the minimum.
+So a phone-sized terminal is the 110×34 game seen from further away rather than
+a cramped one where the fleet cannot reach its own firing positions. Above
+110×34 nothing is zoomed: a bigger window is more room, as before. If the
+window is dragged under the minimum mid-game, the game pauses and says so, and
+picks up where it was once there is room again.
 
 ## Layout
 
@@ -88,6 +99,15 @@ standoff distances the fleet keeps. Those are pace, not size: scaling them would
 make a smaller game a slower one, which is a different thing entirely. What you
 get by turning it down is more room to fly in and a smaller thing to be hit on,
 at exactly the tempo you had before.
+
+The dial is a preference, and it is not how the game fits a small terminal.
+That is the renderer's job (see *Run*): the field stays at least the designed
+size in its own units and `Field` draws it at a zoom below 1, so every distance
+the fight is built on is untouched and only the dots change. The two multiply:
+at 50% zoom with the dial at 50%, a hull is a quarter of its designed dots. The
+dial also sets a hitbox, not just a picture — the mine's trip radius rides it
+along with every hull radius, while its blast radius does not, because the
+blast is drawn as the shock ring and what you see is what reaches you.
 
 Rounds are the part that is easy to get wrong, and this got it wrong first. A
 round is drawn as a streak whose length comes from its speed, and it was tested
@@ -433,10 +453,11 @@ python3 spacewar.py --selftest
 ```
 
 Runs 2,600 frames of simulation and rendering headlessly — every game state,
-both flight models, gear and a bomb, two mid-run resizes, a mini-boss and a
-boss wave, and then a jump into each of the four sectors in turn — and reports
-draw cost per frame and the sectors it visited. It writes its save file to a
-temp path, so your high score is left alone.
+both flight models, gear and a bomb, three mid-run resizes including one down
+to the 40×12 minimum, a mini-boss and a boss wave, and then a jump into each of
+the four sectors in turn — and reports draw cost per frame, the sectors it
+visited, and the field and zoom the minimum terminal gets. It writes its save
+file to a temp path, so your high score is left alone.
 
 ```sh
 python3 -m unittest test_spacewar

@@ -34,7 +34,7 @@ class GameRender:
             amp = min(2.0, self.shake * 7.0)
             cx += int(round(amp * math.sin(self.shake * 47.0)))
             cy += int(round(amp * 0.55 * math.sin(self.shake * 39.0 + 1.7)))
-        f = Field(sc, cx, cy, *self.world)
+        f = Field(sc, cx, cy, *self.world, zoom=self.fit)
 
         # In a nebula anything past sensor range is a blip: the fleet a
         # blinking dot in its own colour, its rounds the faintest speck,
@@ -156,15 +156,16 @@ class GameRender:
             mid += " · " + SECTORS[self.cur]["name"]
         if w > 56:
             mid += "  " + ("▾" * min(left_over, 12) if left_over else "CLEAR")
-        if x + len(mid) + 6 < w - 16:
-            sc.text((w - len(mid)) // 2 - 1, 0, " " + mid + " ", A("accent"))
+        right = "HIGH %d" % max(self.high, self.score)
+        mx = (w - len(mid)) // 2 - 1
+        if mx >= x and mx + len(mid) + 2 < w - len(right) - 3:
+            sc.text(mx, 0, " " + mid + " ", A("accent"))
         if boss is not None and w > 64:
             self.boss_bar(sc, boss)
         elif w > 64:
             tender = next((f for f in self.foes if f.escape is not None), None)
             if tender is not None:
                 self.tender_bar(sc, tender)
-        right = "HIGH %d" % max(self.high, self.score)
         if len(right) + 6 < w:
             sc.text(w - len(right) - 3, 0, " " + right + " ", A("ui"))
 
@@ -317,32 +318,55 @@ class GameRender:
             sc.ctext(y + i, s, ramp("title", i / max(1, len(lines) - 1) * 0.8))
         y += len(lines) + 1
         mode = "ARCADE" if self.mode == "arcade" else "CLASSIC"
-        moves = ("↑ ↓ ← →  fly      Y U B N  diagonals      0  all stop"
-                 if self.mode == "arcade"
-                 else "← → turn      ↑ thrust      ↓ retro")
-        rows = [
-            (0, moves, A("ui_hi")),
-            (1, ("hold a key to fly - let go and the ship stops"
-                 if self.mode == "arcade"
-                 else "hold to turn and thrust - there are no brakes"),
-             A("dim")),
-            (2, "guns fire themselves - fly to aim      X hyperspace",
-             A("ui")),
-            (3, "M  flight model:  %s        - =  size:  %d%%"
-                % (mode, round(config.SCALE * 100)), A("warn")),
-            (5, "interceptor 150   gunship 400   rocks 20/50/100", A("dim")),
-            (6, "MARAUDER every 5th wave 2500   DREADNOUGHT every 10th 12000",
-             A("warn")),
-            (7, "wrecks drop magazines and gear:  O shield   * bomb (Z)"
-                "   + ship", A("dim")),
-            (8, "chain kills for up to x5   ·   a new sector every 10 waves",
-             A("dim")),
-        ]
-        if self.high:
-            rows.append((9, "high score  %d" % self.high, A("accent")))
+        arcade = self.mode == "arcade"
+        if sc.w >= 62:
+            rows = [
+                (0, ("↑ ↓ ← →  fly      Y U B N  diagonals      0  all stop"
+                     if arcade else "← → turn      ↑ thrust      ↓ retro"),
+                 A("ui_hi")),
+                (1, ("hold a key to fly - let go and the ship stops"
+                     if arcade
+                     else "hold to turn and thrust - there are no brakes"),
+                 A("dim")),
+                (2, "guns fire themselves - fly to aim      X hyperspace",
+                 A("ui")),
+                (3, "M  flight model:  %s        - =  size:  %d%%"
+                    % (mode, round(config.SCALE * 100)), A("warn")),
+            ]
+        else:
+            # A narrow terminal: the same four lines, said shorter.
+            rows = [
+                (0, ("↑↓←→ fly   YUBN diagonal   0 stop" if arcade
+                     else "←→ turn   ↑ thrust   ↓ retro"), A("ui_hi")),
+                (1, ("hold to fly, let go to stop" if arcade
+                     else "no brakes: momentum is yours"), A("dim")),
+                (2, "auto guns, fly to aim    X warp", A("ui")),
+                (3, "M  %s     - =  size %d%%"
+                    % (mode, round(config.SCALE * 100)), A("warn")),
+            ]
         pulse = math.sin(time.time() * 4.0) > 0
-        rows.append((11, "───  PRESS  SPACE  TO  LAUNCH  ───",
-                     A("warn") if pulse else A("dim")))
+        launch = ("───  PRESS  SPACE  TO  LAUNCH  ───",
+                  A("warn") if pulse else A("dim"))
+        if sc.h - y >= 13:
+            rows += [
+                (5, "interceptor 150   gunship 400   rocks 20/50/100",
+                 A("dim")),
+                (6, "MARAUDER every 5th wave 2500   DREADNOUGHT every 10th "
+                    "12000", A("warn")),
+                (7, "wrecks drop magazines and gear:  O shield   * bomb (Z)"
+                    "   + ship", A("dim")),
+                (8, "chain kills for up to x5   ·   a new sector every 10 "
+                    "waves", A("dim")),
+            ]
+            if self.high:
+                rows.append((9, "high score  %d" % self.high, A("accent")))
+            rows.append((11,) + launch)
+        else:
+            # A short terminal: the controls, and the way in. The rest is
+            # in the README, and on the field.
+            if self.high:
+                rows.append((4, "high score  %d" % self.high, A("accent")))
+            rows.append((min(5, sc.h - y - 2),) + launch)
         for dy, text, attr in rows:
             self.matte(sc, y + dy, len(text))
             sc.ctext(y + dy, text, attr)

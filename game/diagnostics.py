@@ -73,8 +73,13 @@ def selftest(frames=2600):
             g.bomb()
         if i == 400:
             g.resize(60, 20)
+        if i == 600:                    # the minimum: same field, zoomed
+            g.resize(config.MIN_W, config.MIN_H)
+            assert g.fit < 1.0
+            assert abs(g.world[0] * g.fit - (config.MIN_W - 2) * 2) < 1.0
         if i == 800:
             g.resize(160, 46)
+            assert g.fit == 1.0
         d0 = time.perf_counter()
         g.render()
         g.draw_title(g.screen)
@@ -90,6 +95,10 @@ def selftest(frames=2600):
     print("            score %d  wave %d  objects %d  mode %s"
           % (g.score, g.level, len(g.movers()), g.mode))
     print("            sectors %s" % " ".join(sorted(seen)))
+    small = Game(config.MIN_W, config.MIN_H)
+    print("            %dx%d plays a %dx%d field at %.0f%% zoom"
+          % (config.MIN_W, config.MIN_H, small.world[0], small.world[1],
+             small.fit * 100))
 
 
 def keytest(stdscr):

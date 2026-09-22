@@ -6,8 +6,19 @@ import os
 
 
 TAU = math.tau
-MIN_W, MIN_H = 48, 16
+MIN_W, MIN_H = 40, 12
 FPS = 60.0
+
+# The field the game was designed on, in braille dots: a 110x34 terminal. A
+# smaller terminal does not get a smaller game - it gets this game seen from
+# further away. The simulation runs on a field at least this big, in its own
+# units, and the renderer zooms it down by `fit` to the dots it actually has.
+# So the standoff a gunship keeps, the reach of a mine, the second it takes a
+# round to cross the screen - all of it is the same at 48x16 as at 110x34;
+# there are just fewer dots to draw it with. Bigger terminals are not zoomed
+# in: they get more field, as they always have.
+DESIGN_W, DESIGN_H = 216, 128
+FIT_MIN = 0.5           # below this a hull is too few dots to read
 
 # A handful of moments ring the terminal bell - a boss down, a ship lost, an
 # extra ship earned - and no more: a beep per shot would be unbearable.
@@ -27,7 +38,9 @@ def beep():
 # every hull, rock, magazine and mine - the field, the speeds and the standoff
 # distances are deliberately left alone, so turning it down does not slow the
 # game or spread the fight out: it just gives you more room to fly in and a
-# smaller thing to be hit on.
+# smaller thing to be hit on. This is the player's preference. Fitting the
+# game to a small terminal is a different job - see DESIGN_W above - and is
+# done by the renderer, not by this number.
 #
 # Never read this at import time - the player changes it while playing, with
 # - and =, so read config.SCALE where you need it and let scale.apply() do

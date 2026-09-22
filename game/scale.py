@@ -11,6 +11,12 @@ and would round a rock away to nothing after enough turns.
 `resize()` does the same for the things already on the field, so turning the
 dial does not leave you flying a small ship through boulders that are still
 the old size.
+
+This dial is a preference, not a fit. Making the game playable on a small
+terminal is the renderer's job: `Game.layout()` keeps the field at least the
+designed size and draws it through `Field(zoom=...)` at fewer dots per unit,
+so the distances the fight is built on - standoffs, blast radii, a round's
+flight time - never change with the window. Only how many dots draw them.
 """
 
 from . import config
@@ -24,6 +30,7 @@ _SHIP_DRAW = Ship.DRAW_R
 _PICKUP_R = Pickup.R
 _BULLET_R = Bullet.R
 _MINE_R = Mine.R
+_MINE_TRIG = Mine.TRIG
 _ROCK = dict(Asteroid.SPECS)
 _RAIDER = {k: v["r"] for k, v in Raider.SPECS.items()}
 
@@ -48,6 +55,10 @@ def apply(value):
     Pickup.R = _PICKUP_R * value
     Bullet.R = _BULLET_R * value
     Mine.R = _MINE_R * value
+    # The trip radius is a hitbox - how close a hull may come - so it rides
+    # the dial with the hull. The blast radius does not: it is drawn, as the
+    # shock ring, so what you see is what reaches you at any setting.
+    Mine.TRIG = _MINE_TRIG * value
     Asteroid.SPECS = {size: (r * value, speed, points)
                       for size, (r, speed, points) in _ROCK.items()}
     for kind, r in _RAIDER.items():
