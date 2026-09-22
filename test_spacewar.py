@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Unit tests for asteroids.py.
+"""Unit tests for spacewar.py.
 
-    python3 -m unittest test_asteroids
+    python3 -m unittest test_spacewar
 
 Headless: no terminal is needed, and the save file goes to a temp path.
 """
@@ -9,13 +9,13 @@ import os
 import tempfile
 import unittest
 
-os.environ["ASTEROIDS_STATE"] = os.path.join(tempfile.gettempdir(),
-                                             ".asteroids_test_state")
+os.environ["SPACEWAR_STATE"] = os.path.join(tempfile.gettempdir(),
+                                            ".spacewar_test_state")
 
 import curses                                                   # noqa: E402
-import asteroids as ast                                         # noqa: E402
-from asteroids import (Game, Keys, Reader, Bullet, Raider, Ship,   # noqa: E402
-                       PRESS, REPEAT, RELEASE)
+import spacewar as ast                                          # noqa: E402
+from spacewar import (Game, Keys, Reader, Bullet, Raider, Ship,    # noqa: E402
+                      PRESS, REPEAT, RELEASE)
 
 
 class FakeScreen:
@@ -143,6 +143,39 @@ class ScoringTests(unittest.TestCase):
         self.assertIsNone(g.ship)
         self.assertEqual(g.combo, 0)
         self.assertEqual(g.weapon, "gauss")
+
+
+class CadenceTests(unittest.TestCase):
+    def test_gun_fires_five_a_second(self):
+        self.assertAlmostEqual(1.0 / Game.GUN_CD, 5.0, places=6)
+
+    def test_gun_cadence_holds_over_a_second(self):
+        g = game()
+        g.foes, g.asteroids, g.bullets = [], [], []
+        g.shots, g.fire_cd = 0, 0.0
+        k = Keys()
+        for i in range(120):                       # one second of ticks
+            k.tick(i / 120)
+            g.advance(1 / 120, k)
+            g.bullets = []                         # never let the cap bite
+        self.assertEqual(g.shots, 5)
+
+    def test_rapid_is_about_three_times_the_gun(self):
+        ratio = Game.GUN_CD / ast.WEAPONS["rapid"]["cd"]
+        self.assertGreater(ratio, 2.5)
+        self.assertLess(ratio, 3.5)
+
+    def test_only_rapid_outpaces_the_gun(self):
+        faster = [k for k, w in ast.WEAPONS.items() if w["cd"] < Game.GUN_CD]
+        self.assertEqual(faster, ["rapid"])
+
+    def test_foes_fire_at_their_quoted_gap_then_faster(self):
+        for kind, spec in Raider.SPECS.items():
+            wave1 = Raider(kind, 0, 0, 0.0).cd0
+            wave10 = Raider(kind, 0, 0, 1.0).cd0
+            self.assertAlmostEqual(wave1, spec["cd"], places=6)
+            self.assertLess(wave10, wave1)
+            self.assertGreater(wave10 / wave1, 0.5)
 
 
 class GearTests(unittest.TestCase):
@@ -277,6 +310,48 @@ class KeysTests(unittest.TestCase):
         self.assertEqual(k.axis("left"), 1.0)
         k.tick(0.5 + Keys.STUCK + 0.1)
         self.assertEqual(k.axis("left"), 0.0)
+
+    def test_exact_hold_survives_tapping_another_key(self):
+        # The OS repeats only the newest key: hold Right, tap X, and Right
+        # goes quiet. It is still held, and must still count.
+        k = Keys()
+        k.exact = True
+        k.press(("right",), 0.0, PRESS)
+        k.press(("right",), 0.5, REPEAT)
+        k.other(1.0)                                   # X, say
+        k.tick(1.0 + Keys.STUCK + 1.0)
+        self.assertEqual(k.axis("right"), 1.0)
+
+    def test_exact_older_arrow_survives_newer_one(self):
+        k = Keys()
+        k.exact = True
+        k.press(("right",), 0.0, PRESS)
+        k.press(("right",), 0.5, REPEAT)
+        k.press(("up",), 1.0, PRESS)
+        k.press(("up",), 1.5, REPEAT)
+        k.tick(4.0)
+        self.assertEqual(k.axis("right"), 1.0)        # never judged silent
+        self.assertEqual(k.axis("up"), 0.0)           # the newest one is
+
+    def test_exact_reverse_cancels_then_restores(self):
+        k = Keys()
+        k.exact = True
+        k.press(("right",), 0.0, PRESS)
+        k.press(("left",), 0.1, PRESS)
+        k.tick(0.1)
+        self.assertEqual(k.axis("right"), 0.0)        # newer key wins...
+        self.assertEqual(k.axis("left"), 1.0)
+        k.press(("left",), 0.5, RELEASE)
+        self.assertEqual(k.axis("right"), 1.0)        # ...until it is let go
+        k.press(("right",), 0.6, RELEASE)
+        self.assertEqual(k.axis("right"), 0.0)
+
+    def test_exact_diagonal_key_is_not_its_own_opposite(self):
+        k = Keys()
+        k.exact = True
+        k.press(("up", "right"), 0.0, PRESS)
+        k.tick(0.0)
+        self.assertEqual((k.axis("up"), k.axis("right")), (1.0, 1.0))
 
     def test_brake_clears_exact_holds(self):
         k = Keys()

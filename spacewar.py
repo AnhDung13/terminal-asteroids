@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ASTEROIDS - a terminal space shooter with braille-pixel graphics.
+SPACE WAR - a terminal space shooter with braille-pixel graphics.
 
 You fly one ship against a hostile fleet: interceptors and gunships every
 wave, a Marauder every fifth, a Dreadnought every tenth. Wrecks drop special
@@ -16,7 +16,7 @@ Flight models (toggle with M):
             it. Snappy, 8-way, forgiving. Default.
   CLASSIC - rotate and thrust, Newtonian drift, no brakes. The 1979 feel.
 
-Run:  python3 asteroids.py
+Run:  python3 spacewar.py
 """
 
 import curses
@@ -49,9 +49,9 @@ def beep():
 
 # Overridable so tests never clobber a real player's save file.
 STATE_FILE = os.environ.get(
-    "ASTEROIDS_STATE",
+    "SPACEWAR_STATE",
     os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                 ".asteroids_state"))
+                 ".spacewar_state"))
 
 # ==========================================================================
 # Colour
@@ -586,16 +586,18 @@ class Bullet:
 
 # Salvaged from a wrecked hull: a magazine of something better than the
 # ship's own gun. One at a time, and it runs out.
+# Every cadence here is quoted against Game.GUN_CD, the ship's own gun, so
+# that changing how strong the base gun is moves the whole armoury with it.
 WEAPONS = {
-    "spread": dict(tag="S", name="SPREAD", col="foe2", ammo=55, cd=0.17,
+    "spread": dict(tag="S", name="SPREAD", col="foe2", ammo=55, cd=0.24,
                    note="a fan of three"),
-    "rapid": dict(tag="R", name="RAPID", col="foe1", ammo=150, cd=0.052,
+    "rapid": dict(tag="R", name="RAPID", col="foe1", ammo=150, cd=0.07,
                   note="three times the cadence"),
-    "pierce": dict(tag="P", name="LANCE", col="ui_hi", ammo=60, cd=0.14,
+    "pierce": dict(tag="P", name="LANCE", col="ui_hi", ammo=60, cd=0.20,
                    note="passes through hulls"),
-    "homing": dict(tag="H", name="SEEKER", col="foe3", ammo=55, cd=0.20,
+    "homing": dict(tag="H", name="SEEKER", col="foe3", ammo=55, cd=0.28,
                    note="curves onto its target"),
-    "gauss": dict(tag="G", name="GAUSS", col="foe4", ammo=26, cd=0.30,
+    "gauss": dict(tag="G", name="GAUSS", col="foe4", ammo=26, cd=0.40,
                   note="three hull points a slug"),
 }
 WEAPON_KINDS = ("spread", "rapid", "pierce", "homing", "gauss")
@@ -859,7 +861,10 @@ class Raider:
             self.r = min(self.r, world[0] * 0.115, world[1] * 0.20)
         self.hp = self.hp0 = s["hp"]
         self.speed = s["speed"] * (0.82 + 0.34 * diff)
-        self.cd0 = s["cd"] * (1.30 - 0.50 * diff)
+        # Wave 1 used to open its volleys 30% further apart than the class's
+        # own figure, which read as a fleet waiting its turn. It now fires at
+        # its quoted gap from the start, and closes to two thirds of it.
+        self.cd0 = s["cd"] * (1.00 - 0.35 * diff)
         self.shots = s["shots"]
         self.jitter = s["jitter"] * (1.35 - 0.75 * diff)
         self.bsp = s["bsp"] * (0.85 + 0.35 * diff)
@@ -1312,6 +1317,12 @@ class Game:
         return GEAR_ODDS[-1][0]
 
     # -- actions ----------------------------------------------------------
+    # The ship's own gun: five rounds a second. It runs on its own and never
+    # runs out, so this one number is most of how strong you are - a faster
+    # gun and the fleet stops being a threat, a slower one and a wave is a
+    # chore. Every magazine is quoted against it.
+    GUN_CD = 0.20
+
     def fire(self):
         s = self.ship
         if s is None or self.fire_cd > 0:
@@ -1320,7 +1331,7 @@ class Game:
         cap = 18 if spec else 8
         if sum(1 for b in self.bullets if not b.hostile) >= cap:
             return
-        self.fire_cd = spec["cd"] if spec else 0.14
+        self.fire_cd = spec["cd"] if spec else self.GUN_CD
         sp = Bullet.SPEED * (0.85 if self.weapon == "gauss" else 1.0)
         nose = s.hull()[0]
         x, y = nose[0] % self.world[0], nose[1] % self.world[1]
@@ -1958,17 +1969,17 @@ class Game:
         sc.text(x0 + 1, y0 + high, "░" * wide, A("frame"))
 
     BIG = [
-        " █████╗ ███████╗████████╗███████╗██████╗  ██████╗ ██╗██████╗ ███████╗",
-        "██╔══██╗██╔════╝╚══██╔══╝██╔════╝██╔══██╗██╔═══██╗██║██╔══██╗██╔════╝",
-        "███████║███████╗   ██║   █████╗  ██████╔╝██║   ██║██║██║  ██║███████╗",
-        "██╔══██║╚════██║   ██║   ██╔══╝  ██╔══██╗██║   ██║██║██║  ██║╚════██║",
-        "██║  ██║███████║   ██║   ███████╗██║  ██║╚██████╔╝██║██████╔╝███████║",
-        "╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝╚═════╝ ╚══════╝",
+        "███████╗██████╗  █████╗  ██████╗███████╗   ██╗    ██╗ █████╗ ██████╗ ",
+        "██╔════╝██╔══██╗██╔══██╗██╔════╝██╔════╝   ██║    ██║██╔══██╗██╔══██╗",
+        "███████╗██████╔╝███████║██║     █████╗     ██║ █╗ ██║███████║██████╔╝",
+        "╚════██║██╔═══╝ ██╔══██║██║     ██╔══╝     ██║███╗██║██╔══██║██╔══██╗",
+        "███████║██║     ██║  ██║╚██████╗███████╗   ╚███╔███╔╝██║  ██║██║  ██║",
+        "╚══════╝╚═╝     ╚═╝  ╚═╝ ╚═════╝╚══════╝    ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝",
     ]
     MID = [
-        "╔═╗╔═╗╔╦╗╔═╗╦═╗╔═╗╦╔╦╗╔═╗",
-        "╠═╣╚═╗ ║ ║╣ ╠╦╝║ ║║ ║ ╚═╗",
-        "╩ ╩╚═╝ ╩ ╚═╝╩╚═╚═╝╩═╩╝╚═╝",
+        "╔═╗╔═╗╔═╗╔═╗╔═╗  ╦ ╦╔═╗╦═╗",
+        "╚═╗╠═╝╠═╣║  ║╣   ║║║╠═╣╠╦╝",
+        "╚═╝╩  ╩ ╩╚═╝╚═╝  ╚╩╝╩ ╩╩╚═",
     ]
 
     @staticmethod
@@ -1978,7 +1989,7 @@ class Game:
         sc.text((sc.w - w) // 2, y, " " * w, 0)
 
     def draw_title(self, sc):
-        lines = ["A S T E R O I D S"]
+        lines = ["S P A C E   W A R"]
         for cand in (self.BIG, self.MID):
             if len(cand[0]) <= sc.w - 6:
                 lines = cand
@@ -2153,12 +2164,17 @@ class Keys:
         # held while any key mapped to it is down, and that is all.
         self.exact = False
         self.down = dict.fromkeys(self.DIRS, 0)       # keys holding each
+        self.muted = dict.fromkeys(self.DIRS, False)  # overridden by opposite
         self.seen = dict.fromkeys(self.DIRS, -9.0)    # last press/repeat
+        self.last_press = -9.0                        # of any key at all
         self.saw_repeat = False
 
     # Exact mode: a release can still go missing - focus lost mid-hold, say.
     # Once this terminal has shown it repeats held keys, a key that has gone
-    # quiet for far longer than any repeat period is not held any more.
+    # quiet for far longer than any repeat period is not held any more. But
+    # the OS repeats only the *most recently pressed* key, so silence from an
+    # older one means nothing - hold Right, tap X, and Right goes quiet while
+    # still very much held. Only the newest press can be judged by silence.
     STUCK = 1.5
 
     @property
@@ -2221,8 +2237,14 @@ class Keys:
 
     def _exact(self, names, now, event):
         for name in names:
+            opp = self.OPPOSITE[name]
             if event == RELEASE:
                 self.down[name] = max(0, self.down[name] - 1)
+                if self.down[name] == 0:
+                    self.muted[name] = False
+                    # Letting go of the newer key hands control back to the
+                    # opposite one if it is still held.
+                    self.muted[opp] = False
             elif event == REPEAT:
                 self.down[name] = max(1, self.down[name])
                 self.seen[name] = now
@@ -2230,11 +2252,19 @@ class Keys:
             else:
                 self.down[name] += 1
                 self.seen[name] = now
+                self.last_press = now
+                self.muted[name] = False
+                # Reversing cancels, as it does without the protocol: two
+                # opposed keys would otherwise sum to a dead stop, and rolling
+                # from one arrow to the other always overlaps them a little.
+                if opp not in names:
+                    self.muted[opp] = True
 
     def other(self, now, skip=()):
         """Any key event at all keeps recently-pressed directions alive."""
         if self.exact:
-            return                    # nothing to keep alive: holds are real
+            self.last_press = now     # nothing to keep alive: holds are real
+            return
         self._carry(now, self.CARRY_OTHER, skip=skip)
 
     def _carry(self, now, window, skip=()):
@@ -2252,9 +2282,10 @@ class Keys:
         """
         now = self.now
         if self.exact:
-            if self.down[name] <= 0:
+            if self.down[name] <= 0 or self.muted[name]:
                 return 0.0
-            if self.saw_repeat and now - self.seen[name] > self.STUCK:
+            if (self.saw_repeat and self.seen[name] >= self.last_press
+                    and now - self.seen[name] > self.STUCK):
                 self.down[name] = 0           # a release we never saw
                 return 0.0
             return 1.0
@@ -2461,8 +2492,12 @@ def loop(stdscr, game, keys, reader):
                     game.fire()
 
         if game.state != prev_state:
-            if game.state != "play":
-                keys.brake()          # a new ship starts stationary
+            # A new ship starts stationary - when holds are inferred, since
+            # what is left over may be stale carry. Exact holds are the truth
+            # about the keyboard: if you are still holding Right when the
+            # ship comes back, or the pause lifts, it flies right.
+            if game.state != "play" and not keys.exact:
+                keys.brake()
             prev_state = game.state
         keys.tick(now)
         game.advance(dt, keys)
@@ -2479,7 +2514,7 @@ def selftest(frames=1500):
     """Headless run: simulate and render every state without a terminal."""
     global STATE_FILE
     STATE_FILE = os.path.join(os.environ.get("TMPDIR", "/tmp"),
-                              ".asteroids_selftest_state")
+                              ".spacewar_selftest_state")
     random.seed(5)
     t0 = time.perf_counter()
     g = Game(110, 34)
@@ -2667,7 +2702,7 @@ def main():
         curses.wrapper(run)
     except KeyboardInterrupt:
         pass
-    print("Thanks for playing Asteroids.")
+    print("Thanks for playing Space War.")
 
 
 if __name__ == "__main__":

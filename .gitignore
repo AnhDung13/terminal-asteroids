@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 
 # local play state (high score + chosen flight model)
+.spacewar_state
 .asteroids_state
 .asteroids_highscore
 

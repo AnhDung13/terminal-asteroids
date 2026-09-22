@@ -1,4 +1,4 @@
-# Terminal Asteroids
+# Terminal Space War
 
 A space combat game that runs in your terminal, in a single Python file with
 no dependencies beyond the standard library. You fly one ship against a hostile
@@ -40,7 +40,7 @@ sub-character instead of jumping from cell to cell.
 ## Run
 
 ```sh
-python3 asteroids.py
+python3 spacewar.py
 ```
 
 Python 3.8+ and any terminal at least 48×16. Bigger window = bigger play
@@ -87,7 +87,7 @@ guessed — see the note at the end.
 weak retro burn, and there are no brakes: momentum is yours to manage.
 
 Press `M` any time to swap. Your choice and your high score persist in
-`.asteroids_state` next to the script.
+`.spacewar_state` next to the script.
 
 ## The gun
 
@@ -103,8 +103,9 @@ every time you steer, which is exactly when you need it. A gun with no key has
 nothing to interrupt.
 
 The cost is that aiming means turning the ship toward the thing shooting at
-you. That is the game: a bot that circles, dodges and grabs magazines lands
-about 11% of its shots and dies around wave 8.
+you. That is the game: five rounds a second, all of them going wherever the
+nose happens to be pointing, so every shot you land is a flying decision
+rather than a trigger pull.
 
 ## Scoring
 
@@ -148,13 +149,16 @@ it aboard. One magazine at a time and it runs out, but it stays with you when
 you lose a ship — picking up the same type again tops the count up instead of
 resetting it.
 
+Your own gun fires five rounds a second, and every magazine is quoted against
+that:
+
 | | Magazine | Effect |
 | --- | --- | --- |
-| **S** SPREAD | 55 | a fan of three, 6 shots/s |
-| **R** RAPID | 150 | one bolt at 17 shots/s |
-| **P** LANCE | 60 | passes through hulls and keeps going |
-| **H** SEEKER | 55 | curves onto the nearest ship on its own |
-| **G** GAUSS | 26 | three hull points a slug, 3.5 shots/s |
+| **S** SPREAD | 55 | a fan of three, 4.2 shots/s |
+| **R** RAPID | 150 | one bolt at 14 shots/s |
+| **P** LANCE | 60 | passes through hulls and keeps going, 5 shots/s |
+| **H** SEEKER | 55 | curves onto the nearest ship on its own, 3.6 shots/s |
+| **G** GAUSS | 26 | three hull points a slug, 2.5 shots/s |
 
 GAUSS drops a gunship in one and a Marauder in four; SEEKER is the one weapon
 that aims for you, so it is worth breaking off for. The catch is that a
@@ -200,18 +204,22 @@ the fleet through wave 10 — how many ships, how fast, and how often they fire.
 
 | Wave | Fleet | Rocks | Interceptor speed | Volley gap |
 | --- | --- | --- | --- | --- |
-| 1 | 3 interceptor | 2 | 52 px/s | 2.5 s |
-| 3 | 4 interceptor, 1 gunship | 3 | 54 px/s | 2.4 s |
-| 5 | 4 interceptor, 2 gunship, **Marauder** | 3 | 58 px/s | 2.2 s |
-| 8 | 7 interceptor, 2 gunship | 4 | 67 px/s | 1.8 s |
-| 10 | 4 interceptor, 3 gunship, **Dreadnought** | 5 | 74 px/s | 1.5 s |
-| 15 | 4 interceptor, 2 gunship, **Marauder** | 6 | 74 px/s | 1.5 s |
-| 20 | 4 interceptor, 3 gunship, **Dreadnought** | 6 | 74 px/s | 1.5 s |
+| 1 | 3 interceptor | 2 | 52 px/s | 1.9 s |
+| 3 | 4 interceptor, 1 gunship | 3 | 54 px/s | 1.8 s |
+| 5 | 4 interceptor, 2 gunship, **Marauder** | 3 | 58 px/s | 1.7 s |
+| 8 | 7 interceptor, 2 gunship | 4 | 67 px/s | 1.5 s |
+| 10 | 4 interceptor, 3 gunship, **Dreadnought** | 5 | 74 px/s | 1.2 s |
+| 15 | 4 interceptor, 2 gunship, **Marauder** | 6 | 74 px/s | 1.2 s |
+| 20 | 4 interceptor, 3 gunship, **Dreadnought** | 6 | 74 px/s | 1.2 s |
 
-Ships arrive a few at a time rather than all at once, at most seven on the
-field. A bot that circles, dodges and grabs magazines reaches a median wave 8
-in about four minutes; the Marauder on wave 5 is the first real wall, and it
-gets past it roughly seven runs in eight.
+A class fires at its quoted gap from wave 1 and closes to two thirds of it by
+wave 10. Those gaps are per ship, and jittered ±20% on each reload, so what
+you actually face is the whole fleet's fire overlapping.
+
+Ships arrive a few at a time rather than all at once, at most seven escorts on
+the field, and a capital ship is extra on top of that. The Marauder on wave 5
+is the first real wall — it is the first thing that will not die to one pass,
+and the first that comes to you rather than waiting.
 
 ## What's in the renderer
 
@@ -269,7 +277,7 @@ draw, leaving the 60 fps loop roughly 4% busy.
 ## Development
 
 ```sh
-python3 asteroids.py --selftest
+python3 spacewar.py --selftest
 ```
 
 Runs 1,500 frames of simulation and rendering headlessly — every game state,
@@ -278,7 +286,7 @@ cost per frame. It writes its save file to a temp path, so your high score is
 left alone.
 
 ```sh
-python3 -m unittest test_asteroids
+python3 -m unittest test_spacewar
 ```
 
 Unit tests for the parts that are easy to get subtly wrong: the difficulty
@@ -289,7 +297,7 @@ class's habit, both modes of `Keys`, and every escape sequence `Reader` has
 to decode — legacy arrows, kitty key events, and the terminal's own replies.
 
 ```sh
-python3 asteroids.py --keytest
+python3 spacewar.py --keytest
 ```
 
 Shows what your terminal actually sends while you hold a key: whether it
@@ -310,10 +318,16 @@ query so an unsupporting terminal still answers promptly), and if so pushes
 the flags for press/repeat/release reporting and pops them on exit. From then
 on every key arrives as a sequence with an event type on it, `Reader` decodes
 them alongside the legacy arrows, and `Keys` runs in *exact* mode: a direction
-is held while any key mapped to it is down, full stop. The one guard left is
-for a release that never arrives — focus lost mid-hold — where a key that has
-gone quiet for far longer than any repeat period, on a terminal that has shown
-it does repeat, is dropped. Everything below is about terminals without it.
+is held while any key mapped to it is down, full stop. Reversing still
+cancels — the newer of two opposed arrows wins while both are down, and control
+passes back when it is released — because rolling from one arrow to the other
+always overlaps them for a moment, and a dead stop there feels like a broken
+key. The one guard left is for a release that never arrives (focus lost
+mid-hold): the *most recently pressed* key, on a terminal that has shown it
+repeats held keys, is dropped if it goes quiet for far longer than any repeat
+period. Only the newest press, because the OS repeats only that one — an
+older arrow held under a newer key, or under a tap of `X`, goes quiet while
+still very much held. Everything below is about terminals without it.
 
 Classic terminals report key presses but never key releases, and the OS
 auto-repeats only the *most recently pressed* key. Worse, the delay before that
