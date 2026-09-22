@@ -4,3 +4,6 @@ __pycache__/
 # local play state (high score + chosen flight model)
 .asteroids_state
 .asteroids_highscore
+
+# macOS folder metadata
+.DS_Store

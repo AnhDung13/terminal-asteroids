@@ -57,6 +57,7 @@ fallback.
 | `Space` | launch, from the title screen or after a game over |
 | `0` `.` `,` `5` | all stop |
 | `X` | hyperspace: jump somewhere else, 3s cooldown |
+| `Z` | fire a held bomb: every hostile round gone, every hull hurt |
 | `M` | switch flight model |
 | `P` | pause |
 | `R` | restart |
@@ -71,11 +72,16 @@ sliding around. Pressing the opposite arrow reverses immediately. `Y U B N`
 give a diagonal in one key, which is the reliable way to hold one — two arrows
 at once only ever half-works, for the reason in the note at the end.
 
-Letting go is the one thing a terminal never actually tells you about, so the
-release is inferred: a key stays live for a short window that each repeat
-re-opens, and the ship stops once the repeats stop arriving. Both halves of
-that window are measured from your own keyboard rather than guessed — see the
-note at the end.
+Letting go is the one thing a classic terminal never actually tells you about.
+In a terminal that speaks the **kitty keyboard protocol** — kitty, Ghostty,
+WezTerm, foot, rio and others — the game asks for key releases and gets them,
+so a hold is exact: the ship goes while the key is down and stops the instant
+it is up, two arrows held together are a true diagonal, and none of the
+guessing below applies. The title screen says `KEYS exact` when that is on.
+Everywhere else the release is inferred: a key stays live for a short window
+that each repeat re-opens, and the ship stops once the repeats stop arriving.
+Both halves of that window are measured from your own keyboard rather than
+guessed — see the note at the end.
 
 **CLASSIC** — the 1979 model. `←→` rotate, `↑` thrusts along the nose, `↓` is a
 weak retro burn, and there are no brakes: momentum is yours to manage.
@@ -117,19 +123,30 @@ around it, and their range scales with your window, so a shot always crosses
 the same fraction of the screen whether you play in a small terminal or
 fullscreen.
 
-Asteroids split in two on each hit — large → medium → small → gone. Three
-lives and an extra ship every 20,000 points. A wave ends when its fleet is
-destroyed; leftover rocks drift on into the next one. Ramming a fighter kills
-you and it both; ramming a capital ship only dents it. Game over reports your
-score, waves survived, and shooting accuracy.
+Asteroids split in two on each hit — large → medium → small → gone. They are
+also cover: a hostile round that meets a rock stops there, so a boulder between
+you and a gunship is worth keeping. Three lives and an extra ship every 20,000
+points. A wave ends when its fleet is destroyed; leftover rocks drift on into
+the next one. Ramming a fighter kills you and it both; ramming a capital ship
+only dents it. Game over reports your score, waves survived, shooting accuracy
+and your longest chain.
+
+**The chain.** Every ship you down extends a chain, and the chain sets a
+multiplier on everything you score: ×2 after three kills, ×3 after six, up to
+×5. Go five seconds without a kill, or lose a ship, and it resets to ×1. Rocks
+ride the multiplier but do not extend the chain. The HUD shows the current
+multiplier with a bar draining toward the reset — the reason to press the
+attack rather than snipe from across the field.
 
 ## Weapons
 
 Your own gun is one bolt at a time. Anything better has to be taken off a
-wreck: an interceptor drops a magazine 10% of the time, a gunship 26%, and a
-capital ship always gives up two or three. Fly over the tumbling hex to load
-it. One magazine at a time, it runs out, and it does not survive your death —
-picking up the same type again tops the count up instead of resetting it.
+wreck: an interceptor drops salvage 10% of the time, a gunship 26%, and a
+capital ship always gives up two or three pieces. Seven drops in ten are a
+magazine (a tumbling hex); the rest are gear (a diamond). Fly over one to take
+it aboard. One magazine at a time and it runs out, but it stays with you when
+you lose a ship — picking up the same type again tops the count up instead of
+resetting it.
 
 | | Magazine | Effect |
 | --- | --- | --- |
@@ -143,6 +160,38 @@ GAUSS drops a gunship in one and a Marauder in four; SEEKER is the one weapon
 that aims for you, so it is worth breaking off for. The catch is that a
 magazine is always somewhere you would rather not be — chasing one is what
 gets you killed.
+
+### Gear
+
+| | Gear | Effect |
+| --- | --- | --- |
+| **O** SHIELD | half of gear drops | a ring round the hull that eats one hit, then is gone |
+| **\*** BOMB | a third | held, up to three; `Z` clears every hostile round and deals 4 hull to every ship on screen |
+| **+** EXTRA SHIP | the rest | one more life |
+
+A bomb kills any escort outright and takes a Marauder down a third; on a
+Dreadnought it is the thing that gets you out from under a ring of fire. The
+shield does not reset your chain when it takes a hit — that is what it is for.
+
+## The fleet
+
+Every hostile ship flies to a standoff distance and circles it rather than
+drifting across the screen, so the fight happens around you instead of past
+you. Beyond that, each class has one habit of its own:
+
+- **Interceptor** — shoots at where you are. Fast, fragile, and there are a
+  lot of them.
+- **Gunship** — shoots at where you are *going to be*: it leads its pairs by
+  your velocity over the round's flight time, so flying in a straight line
+  past one is how you get hit. Change course after it fires.
+- **Marauder** — circles for a few seconds, then breaks orbit and runs
+  straight at you at more than twice its cruise speed, peels off, and circles
+  again. The charge is telegraphed by the turn toward you; sidestep it, and it
+  is exposed for a second on the way back out.
+- **Dreadnought** — once it is down to half its hull, it goes on throwing its
+  seven-round volleys and adds a full ring of sixteen slower rounds every few
+  seconds, from all round the hull. The ring rotates and the gaps are wide:
+  it is dodged by moving, not by luck. A bomb, if you have one, is for this.
 
 ## Difficulty
 
@@ -171,8 +220,9 @@ gets past it roughly seven runs in eight.
   them at any size and a silhouette is designed as a shape, not as code. Every
   nozzle trails its own flickering engine bloom, and a capital ship fits
   itself to the field so it cannot swallow a small terminal
-- Dropped magazines as a slowly rotating hex with the weapon's letter inside,
-  blinking out over their last four seconds
+- Dropped salvage as a slowly rotating hex (a magazine) or diamond (gear) with
+  its letter inside, blinking out over their last four seconds; a shield is a
+  sparse breathing ring round your hull
 - Round tumbling asteroid outlines with interior craters, flashing white on the
   frame they're hit
 - Your ship as one unbroken chevron — raked nose, kinked shoulders, wings
@@ -223,24 +273,52 @@ python3 asteroids.py --selftest
 ```
 
 Runs 1,500 frames of simulation and rendering headlessly — every game state,
-both flight models, two mid-run resizes — and reports draw cost per frame. It
-writes its save file to a temp path, so your high score is left alone.
+both flight models, gear and a bomb, two mid-run resizes — and reports draw
+cost per frame. It writes its save file to a temp path, so your high score is
+left alone.
+
+```sh
+python3 -m unittest test_asteroids
+```
+
+Unit tests for the parts that are easy to get subtly wrong: the difficulty
+dial and wave rosters, bullet range, shot and hit accounting (a fan is three
+shots, a lance threading three hulls is one hit), the chain multiplier and its
+lapse, shield, bomb and life pickups, rocks stopping hostile rounds, each
+class's habit, both modes of `Keys`, and every escape sequence `Reader` has
+to decode — legacy arrows, kitty key events, and the terminal's own replies.
 
 ```sh
 python3 asteroids.py --keytest
 ```
 
-Shows what your terminal actually sends while you hold a key: the delay before
-auto-repeat starts, the rate once it does, and whether either one is out of the
-range the flight model can cope with. Every input constant in `Keys` is a bet
-about those two numbers, so this is the thing to run first when the ship feels
-like it is fighting you.
+Shows what your terminal actually sends while you hold a key: whether it
+reports releases (kitty keyboard protocol), the delay before auto-repeat
+starts, the rate once it does, and whether either one is out of the range the
+flight model can cope with. Every input constant in `Keys` is a bet about
+those two numbers, so this is the thing to run first when the ship feels like
+it is fighting you.
+
+`--mute` turns off the terminal bell, which otherwise rings for a boss down, a
+ship lost, an extra ship and a bomb — and nothing else.
 
 ### A note on holding keys
 
-Terminals report key presses but never key releases, and the OS auto-repeats
-only the *most recently pressed* key. Worse, the delay before that repeat train
-starts is a user setting — and for some setups arrows do not repeat at all.
+The clean way out is the **kitty keyboard protocol**. On start the game asks
+the terminal whether it speaks it (`CSI ? u`, chased with a device-attributes
+query so an unsupporting terminal still answers promptly), and if so pushes
+the flags for press/repeat/release reporting and pops them on exit. From then
+on every key arrives as a sequence with an event type on it, `Reader` decodes
+them alongside the legacy arrows, and `Keys` runs in *exact* mode: a direction
+is held while any key mapped to it is down, full stop. The one guard left is
+for a release that never arrives — focus lost mid-hold — where a key that has
+gone quiet for far longer than any repeat period, on a terminal that has shown
+it does repeat, is dropped. Everything below is about terminals without it.
+
+Classic terminals report key presses but never key releases, and the OS
+auto-repeats only the *most recently pressed* key. Worse, the delay before that
+repeat train starts is a user setting — and for some setups arrows do not
+repeat at all.
 
 So a release has to be inferred, and the whole flight model comes down to two
 numbers: how long a *fresh* press stays live (it has to outlast the delay

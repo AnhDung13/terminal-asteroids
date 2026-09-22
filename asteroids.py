@@ -24,6 +24,7 @@ import locale
 import math
 import os
 import random
+import re
 import sys
 import time
 from itertools import groupby
@@ -31,6 +32,20 @@ from itertools import groupby
 TAU = math.tau
 MIN_W, MIN_H = 48, 16
 FPS = 60.0
+
+# A handful of moments ring the terminal bell - a boss down, a ship lost, an
+# extra ship earned - and no more: a beep per shot would be unbearable.
+# --mute silences even those.
+SOUND = [True]
+
+
+def beep():
+    if not SOUND[0]:
+        return
+    try:
+        curses.beep()
+    except curses.error:
+        pass
 
 # Overridable so tests never clobber a real player's save file.
 STATE_FILE = os.environ.get(
@@ -358,6 +373,7 @@ class Ship:
         self.thrust = 0.0            # 0..1 visual throttle
         self.invuln = 2.2
         self.warp_cd = 0.0
+        self.shield = False          # salvaged: eats one hit, then gone
 
     def _ease(self, cur, target, dt):
         """Slew a raw 0/1 key state toward its target - fast on, gentle off."""
@@ -453,6 +469,11 @@ class Ship:
         draw_hull(f, self.x, self.y, self.ang, r, PLAYER, A("ship"), 6)
         draw_hull(f, self.x, self.y, self.ang, r, PLAYER_TRIM,
                   A("ship_dim"), 6)
+        if self.shield:
+            # A slow-breathing ring, drawn sparse so the hull inside it
+            # stays legible.
+            rr = r * 1.45 + 0.8 * math.sin(time.time() * 5.0)
+            f.arc(self.x, self.y, rr, A("ui_hi"), 5, step=2.4)
         if self.thrust <= 0.05:
             return
         # A plume off each nozzle, the middle one longest, all of them
@@ -579,6 +600,18 @@ WEAPONS = {
 }
 WEAPON_KINDS = ("spread", "rapid", "pierce", "homing", "gauss")
 
+# The rest of the salvage is not a gun. A shield eats one hit, a bomb is held
+# until you need it, a spare ship is a spare ship.
+GEAR = {
+    "shield": dict(tag="O", name="SHIELD", col="ui_hi", note="absorbs one hit"),
+    "bomb": dict(tag="*", name="BOMB", col="warn", note="Z to fire it"),
+    "life": dict(tag="+", name="EXTRA SHIP", col="ship", note="one more ship"),
+}
+# kind -> share, among the drops that are gear rather than a magazine
+GEAR_ODDS = (("shield", 0.50), ("bomb", 0.35), ("life", 0.15))
+ITEMS = dict(WEAPONS)
+ITEMS.update(GEAR)
+
 
 class Pickup:
     """A dropped magazine, tumbling where its ship came apart."""
@@ -606,12 +639,15 @@ class Pickup:
     def draw(self, f):
         if self.life < 4.0 and int(self.life * 7) % 2 == 0:
             return
-        spec = WEAPONS[self.kind]
+        spec = ITEMS[self.kind]
         att = A(spec["col"])
         r = self.R * (1.0 + 0.10 * math.sin(self.t * 4.0))
-        pts = [(self.x + r * math.cos(self.t * 1.5 + i * TAU / 6),
-                self.y + r * math.sin(self.t * 1.5 + i * TAU / 6))
-               for i in range(6)]
+        # Magazines tumble as hexagons, gear as diamonds: tell them apart
+        # before you are close enough to read the letter.
+        n = 6 if self.kind in WEAPONS else 4
+        pts = [(self.x + r * math.cos(self.t * 1.5 + i * TAU / n),
+                self.y + r * math.sin(self.t * 1.5 + i * TAU / n))
+               for i in range(n)]
         f.poly(pts, att, 5)
         f.text(self.x, self.y, spec["tag"], att)
 
@@ -782,27 +818,34 @@ DREADNOUGHT_ENG = [(-1.26, -0.16), (-1.26, 0.16), (-1.08, -0.90),
 
 
 class Raider:
-    """A hostile ship: four classes, one flight brain, four silhouettes.
+    """A hostile ship: four classes, four silhouettes, four habits.
 
-    They fly to a standoff distance and circle it rather than drifting across
-    the screen, so the fight happens around you instead of past you.
+    All of them fly to a standoff distance and circle it rather than drifting
+    across the screen, so the fight happens around you instead of past you.
+    On top of that each class has one thing of its own. An interceptor shoots
+    at where you are. A gunship shoots at where you are going to be. A
+    marauder breaks orbit every few seconds to run straight at you and then
+    peels away. A dreadnought, once it is down to half its hull, throws a full
+    ring of fire every few seconds on top of its volleys.
     """
 
+    # lead: how much of your motion the gunner allows for - 0 fires at where
+    # you are, 1 is a clean intercept on a ship that holds its course.
     SPECS = {
         "scout": dict(r=8.5, hp=1, speed=64.0, cd=1.9, shots=1, jitter=0.26,
                       bsp=78.0, value=150, shape=SCOUT, eng=SCOUT_ENG,
-                      keep=46.0, col="foe1", turn=5.0),
+                      keep=46.0, col="foe1", turn=5.0, lead=0.0),
         "gunship": dict(r=12.0, hp=2, speed=46.0, cd=1.7, shots=2, jitter=0.16,
                         bsp=88.0, value=400, shape=GUNSHIP, eng=GUNSHIP_ENG,
-                        keep=86.0, col="foe2", turn=3.4),
+                        keep=86.0, col="foe2", turn=3.4, lead=1.0),
         "marauder": dict(r=15.0, hp=11, speed=32.0, cd=1.35, shots=4,
                          jitter=0.13, bsp=80.0, value=2500, shape=MARAUDER,
                          eng=MARAUDER_ENG, keep=104.0, col="foe3",
-                         turn=2.4),
+                         turn=2.4, lead=0.0),
         "dread": dict(r=24.0, hp=28, speed=23.0, cd=1.15, shots=7, jitter=0.10,
                       bsp=74.0, value=12000, shape=DREADNOUGHT,
                       eng=DREADNOUGHT_ENG, keep=134.0, col="foe4",
-                      turn=1.7),
+                      turn=1.7, lead=0.6),
     }
     BOSSES = ("marauder", "dread")
 
@@ -835,6 +878,10 @@ class Raider:
         self.t = random.uniform(0, TAU)
         self.flash = 0.0
         self.arrive = 0.7          # brief fade-in so they do not pop in
+        self.lead = s["lead"]
+        self.phase, self.phase_t = "orbit", random.uniform(2.5, 4.5)
+        self.ring_cd = 1.5         # dread: time to the next ring of fire
+        self.raged = False         # dread: has the rage been announced
 
     @staticmethod
     def toward(x1, y1, x2, y2, world):
@@ -843,52 +890,107 @@ class Raider:
         return ((x2 - x1 + w * 0.5) % w - w * 0.5,
                 (y2 - y1 + h * 0.5) % h - h * 0.5)
 
+    # Marauder: circle, then a straight run at you, then break away.
+    CHARGE, RETREAT = 1.5, 1.1                  # seconds in each
+    CHARGE_SPEED, RETREAT_SPEED = 2.3, 1.6      # times cruise
+    # Dreadnought, under half hull: a ring of fire every so often.
+    RING_EVERY, RING_SHOTS = 3.2, 16
+
+    def _cycle(self, dt):
+        self.phase_t -= dt
+        if self.phase_t > 0:
+            return
+        if self.phase == "orbit":
+            self.phase, self.phase_t = "charge", self.CHARGE
+        elif self.phase == "charge":
+            self.phase, self.phase_t = "retreat", self.RETREAT
+        else:
+            self.phase, self.phase_t = "orbit", random.uniform(3.0, 5.0)
+
+    @property
+    def enraged(self):
+        return self.kind == "dread" and self.hp * 2 <= self.hp0
+
     def update(self, dt, world, ship, bullets):
         self.t += dt
         self.flash = max(0.0, self.flash - dt)
         self.arrive = max(0.0, self.arrive - dt)
+        speed = self.speed
         if ship is not None:
             dx, dy = self.toward(self.x, self.y, ship.x, ship.y, world)
             d = math.hypot(dx, dy) or 1.0
             ux, uy = dx / d, dy / d
-            # Close on the standoff ring, then circle it. Weaving keeps the
-            # orbit from reading as a perfect, lifeless circle.
-            radial = max(-1.0, min(1.0, (d - self.keep) / 46.0))
-            tang = self.orbit * (1.0 - abs(radial))
-            tang += 0.25 * math.sin(self.t * 1.7 + self.orbit)
-            wx, wy = ux * radial - uy * tang, uy * radial + ux * tang
-            n = math.hypot(wx, wy) or 1.0
-            wx, wy = wx / n, wy / n
+            if self.kind == "marauder":
+                self._cycle(dt)
+            if self.phase == "charge":
+                wx, wy, speed = ux, uy, speed * self.CHARGE_SPEED
+            elif self.phase == "retreat":
+                wx, wy, speed = -ux, -uy, speed * self.RETREAT_SPEED
+            else:
+                # Close on the standoff ring, then circle it. Weaving keeps
+                # the orbit from reading as a perfect, lifeless circle.
+                radial = max(-1.0, min(1.0, (d - self.keep) / 46.0))
+                tang = self.orbit * (1.0 - abs(radial))
+                tang += 0.25 * math.sin(self.t * 1.7 + self.orbit)
+                wx, wy = ux * radial - uy * tang, uy * radial + ux * tang
+                n = math.hypot(wx, wy) or 1.0
+                wx, wy = wx / n, wy / n
             want = math.atan2(dy, dx)
         else:
             wx, wy = math.cos(self.ang), math.sin(self.ang)
-            want, d = self.ang, 1e9
+            want = self.ang
         k = min(1.0, 2.4 * dt)
-        self.vx += (wx * self.speed - self.vx) * k
-        self.vy += (wy * self.speed - self.vy) * k
+        self.vx += (wx * speed - self.vx) * k
+        self.vy += (wy * speed - self.vy) * k
         self.x = (self.x + self.vx * dt) % world[0]
         self.y = (self.y + self.vy * dt) % world[1]
         da = (want - self.ang + math.pi) % TAU - math.pi
         self.ang = (self.ang + da * min(1.0, self.turn * dt)) % TAU
 
         self.cd -= dt
-        if self.cd <= 0 and ship is not None and self.arrive <= 0:
+        if ship is None or self.arrive > 0:
+            return True
+        if self.cd <= 0:
             self.cd = self.cd0 * random.uniform(0.85, 1.25)
-            self.volley(bullets, world, math.atan2(dy, dx))
+            self.volley(bullets, world, self.aim(dx, dy, d, ship))
+        if self.enraged:
+            self.ring_cd -= dt
+            if self.ring_cd <= 0:
+                self.ring_cd = self.RING_EVERY
+                self.ring(bullets, world)
         return True
+
+    def aim(self, dx, dy, d, ship):
+        """The bearing for a volley: at the ship, or ahead of it by `lead`."""
+        if self.lead <= 0:
+            return math.atan2(dy, dx)
+        t = d / self.bsp * self.lead          # the round's flight time
+        return math.atan2(dy + ship.vy * t, dx + ship.vx * t)
 
     def volley(self, bullets, world, base):
         n = self.shots
         step = 0.17 if not self.boss else 0.15
         muzzle = self.r * (1.05 if self.boss else 0.9)
+        ox = self.x + muzzle * math.cos(self.ang)
+        oy = self.y + muzzle * math.sin(self.ang)
         for i in range(n):
             a = base + (i - (n - 1) * 0.5) * step
             a += random.uniform(-self.jitter, self.jitter)
-            bullets.append(Bullet(
-                (self.x + muzzle * math.cos(self.ang)) % world[0],
-                (self.y + muzzle * math.sin(self.ang)) % world[1],
-                self.bsp * math.cos(a), self.bsp * math.sin(a),
-                Bullet.reach(world, self.bsp), hostile=True))
+            self.shoot(bullets, world, ox, oy, a, self.bsp)
+
+    def ring(self, bullets, world):
+        """A full circle of slower rounds, from all round the hull. It is
+        dodged by moving, not by luck: the gaps are wide, and they rotate."""
+        off = self.t * 0.7
+        for i in range(self.RING_SHOTS):
+            a = off + i * TAU / self.RING_SHOTS
+            self.shoot(bullets, world, self.x + self.r * math.cos(a),
+                       self.y + self.r * math.sin(a), a, self.bsp * 0.72)
+
+    def shoot(self, bullets, world, ox, oy, a, sp):
+        bullets.append(Bullet(ox % world[0], oy % world[1],
+                              sp * math.cos(a), sp * math.sin(a),
+                              Bullet.reach(world, sp), hostile=True))
 
     def hit(self, dmg=1):
         self.hp -= dmg
@@ -936,6 +1038,7 @@ class Game:
         self.shake = 0.0
         self.sweep = 0.0
         self.demo_fire = 0.0
+        self.exact_keys = False    # terminal reports key releases (kitty)
         self.reset(full=True)
         self.stars = [Star(self.world) for _ in range(self.star_count())]
         self.spawn_wave()
@@ -994,7 +1097,10 @@ class Game:
         # objective. A handful, and never a field to grind through.
         return min(2 + self.level // 3, 6)
 
-    MAX_FOES = 7            # on screen at once, boss excepted
+    MAX_FOES = 7            # escorts on screen at once; a boss is extra
+
+    def escorts(self):
+        return sum(1 for f in self.foes if not f.boss)
 
     def is_boss_wave(self):
         return self.level % 10 == 0
@@ -1075,12 +1181,16 @@ class Game:
         self.fire_cd = 0.0
         self.weapon = None         # None = the ship's own gun
         self.ammo = 0
+        self.bombs = 0
+        self.combo = 0             # ships downed on the current chain
+        self.combo_t = 0.0         # time left before the chain lapses
         if full:
             self.score = 0
             self.lives = 3
             self.level = 0
             self.next_extra = 20000
             self.shots = self.hits = 0
+            self.best_combo = 0
 
     def start_game(self):
         self.reset(full=True)
@@ -1152,16 +1262,54 @@ class Game:
                                            life * random.uniform(0.45, 1.0),
                                            drag))
 
-    def add_score(self, pts, x=None, y=None, attr=None):
+    def add_score(self, pts, x=None, y=None, attr=None, tag=""):
         if self.state == "title":
             return
         self.score += pts
         if x is not None:
-            self.pops.append(Pop(x, y, "+%d" % pts, attr or A("ui_hi")))
+            self.pops.append(Pop(x, y, "+%d%s" % (pts, tag),
+                                 attr or A("ui_hi")))
         if self.score >= self.next_extra:
             self.next_extra += 20000
             self.lives += 1
             self.flash("EXTRA SHIP", 1.6)
+            beep()
+
+    # -- the chain --------------------------------------------------------
+    # Every ship downed extends the chain, and the chain sets the multiplier
+    # on everything you score. Lose a ship, or go COMBO_WINDOW seconds
+    # without a kill, and it is gone. That is the reason to press the attack
+    # rather than snipe from the far side of the field.
+    COMBO_WINDOW = 5.0
+    COMBO_STEP = 3             # kills per multiplier step
+    COMBO_MAX = 5
+
+    def mult(self):
+        return min(1 + self.combo // self.COMBO_STEP, self.COMBO_MAX)
+
+    def chain(self):
+        was = self.mult()
+        self.combo += 1
+        self.combo_t = self.COMBO_WINDOW
+        self.best_combo = max(self.best_combo, self.combo)
+        if self.mult() > was:
+            self.flash("CHAIN  x%d" % self.mult(), 1.0)
+
+    def award(self, base, x, y, attr):
+        m = self.mult()
+        self.add_score(base * m, x, y, attr, " x%d" % m if m > 1 else "")
+
+    @staticmethod
+    def loot():
+        """What a wreck gives up: usually a magazine, sometimes gear."""
+        if random.random() < 0.70:
+            return random.choice(WEAPON_KINDS)
+        r = random.random()
+        for kind, share in GEAR_ODDS:
+            r -= share
+            if r < 0:
+                return kind
+        return GEAR_ODDS[-1][0]
 
     # -- actions ----------------------------------------------------------
     def fire(self):
@@ -1188,7 +1336,7 @@ class Game:
                 sp * math.sin(a) + s.vy * 0.3,
                 Bullet.reach(self.world, sp), dmg=dmg, kind=kind, col=col))
         if self.state != "title":
-            self.shots += 1
+            self.shots += len(angles)      # a fan is three shots, not one
         if spec:
             self.ammo -= 1
             if self.ammo <= 0:
@@ -1214,6 +1362,55 @@ class Game:
         s.warp_cd = 3.0
         self.shocks.append(Shock(s.x, s.y, 3, 24, 0.4))
         self.burst(s.x, s.y, 14, 70, 0.45)
+
+    BOMB_DMG = 4               # kills any escort outright, dents a boss
+    BOMB_MAX = 3
+
+    def bomb(self):
+        """Spend a held bomb: every hostile round gone, every hull hurt."""
+        s = self.ship
+        if s is None or self.bombs <= 0 or self.state != "play":
+            return
+        self.bombs -= 1
+        self.bullets = [b for b in self.bullets if not b.hostile]
+        self.shocks.append(Shock(s.x, s.y, 4, max(self.world) * 0.8, 0.9))
+        self.shocks.append(Shock(s.x, s.y, 2, 40, 0.4))
+        self.shake = max(self.shake, 0.4)
+        self.flash("BOMB", 0.9)
+        beep()
+        for foe in list(self.foes):
+            if foe.arrive > 0:
+                continue
+            if foe.hit(self.BOMB_DMG):
+                self.kill_foe(foe)
+            else:
+                self.burst(foe.x, foe.y, 8, 50, 0.3)
+                self.rage_check(foe)
+
+    def hurt(self):
+        """The ship takes a hit. A shield eats it; otherwise the ship is lost.
+
+        Returns True if the ship was destroyed. Callers check invuln first.
+        """
+        s = self.ship
+        if s.shield:
+            s.shield = False
+            s.invuln = max(s.invuln, 1.0)
+            self.shocks.append(Shock(s.x, s.y, 8, 30, 0.4))
+            self.burst(s.x, s.y, 16, 70, 0.4)
+            self.shake = max(self.shake, 0.15)
+            self.flash("SHIELD DOWN", 1.0)
+            return False
+        self.kill_ship()
+        return True
+
+    def rage_check(self, foe):
+        """Announce a dreadnought crossing into its second, angrier half."""
+        if foe in self.foes and foe.enraged and not foe.raged:
+            foe.raged = True
+            self.flash("DREADNOUGHT ENRAGED", 1.6)
+            self.shocks.append(Shock(foe.x, foe.y, foe.r, foe.r * 3.0, 0.5))
+            beep()
 
     def toggle_mode(self):
         self.mode = "classic" if self.mode == "arcade" else "arcade"
@@ -1285,6 +1482,10 @@ class Game:
             return
 
         # ---- playing ----
+        if self.combo:
+            self.combo_t -= dt
+            if self.combo_t <= 0:
+                self.combo = 0          # went quiet: the chain lapses
         self.fire()             # the gun runs itself; fire_cd paces it
         s = self.ship
         if s:
@@ -1314,7 +1515,7 @@ class Game:
 
         self.spawn_cd -= dt
         if (self.queue and self.spawn_cd <= 0 and
-                len(self.foes) < self.MAX_FOES):
+                self.escorts() < self.MAX_FOES):
             self.spawn_foe(self.queue.pop(0))
             self.spawn_cd = self.spawn_gap()
         for foe in self.foes:
@@ -1371,6 +1572,15 @@ class Game:
     def collisions(self):
         for b in list(self.bullets):
             if b.hostile:
+                # Rocks are cover: a round that meets one stops there. Put a
+                # boulder between you and a gunship and it has earned its
+                # place on the field.
+                for a in self.asteroids:
+                    if self.wrap_dist(b.x, b.y, a.x, a.y) < a.r:
+                        self.bullets.remove(b)
+                        a.flash = 0.06
+                        self.burst(b.x, b.y, 2, 26, 0.15)
+                        break
                 continue
             for foe in list(self.foes):          # ships first: they are the
                 if foe.arrive > 0:               # point of the wave now
@@ -1378,15 +1588,20 @@ class Game:
                 if b.spent is not None and foe in b.spent:
                     continue
                 if self.wrap_dist(b.x, b.y, foe.x, foe.y) < foe.r:
+                    # One shot scores one hit, however many hulls a lance
+                    # threads - or accuracy could read over 100%.
                     if b.spent is None:
                         self.bullets.remove(b)
+                        self.hits += 1
                     else:
+                        if not b.spent:
+                            self.hits += 1
                         b.spent.add(foe)         # a lance carries on through
-                    self.hits += 1
                     if foe.hit(b.dmg):
                         self.kill_foe(foe)
                     else:
                         self.burst(b.x, b.y, 3, 34, 0.18)
+                        self.rage_check(foe)
                     break
             else:
                 for a in list(self.asteroids):
@@ -1394,7 +1609,8 @@ class Game:
                         self.split(a)
                         if b in self.bullets:
                             self.bullets.remove(b)
-                        self.hits += 1
+                        if not b.spent:          # None or empty: first hit
+                            self.hits += 1
                         break
 
         s = self.ship
@@ -1403,20 +1619,13 @@ class Game:
         for pk in list(self.pickups):
             if self.wrap_dist(s.x, s.y, pk.x, pk.y) < Pickup.R + Ship.RADIUS:
                 self.pickups.remove(pk)
-                spec = WEAPONS[pk.kind]
-                # A fresh magazine of the same type tops it up rather than
-                # resetting it, so a lucky double drop is not wasted.
-                self.ammo = (self.ammo if self.weapon == pk.kind else 0)
-                self.ammo += spec["ammo"]
-                self.weapon = pk.kind
-                self.fire_cd = 0.0
-                self.flash(spec["name"], 1.1)
+                self.collect(pk.kind)
                 self.shocks.append(Shock(pk.x, pk.y, 2, 20, 0.35))
                 self.burst(pk.x, pk.y, 10, 55, 0.4)
         for a in list(self.asteroids):
             if self.wrap_dist(s.x, s.y, a.x, a.y) < a.r + Ship.RADIUS:
                 if s.invuln <= 0:
-                    self.kill_ship()
+                    self.hurt()
                     self.split(a, award=False)
                 return
         for foe in list(self.foes):
@@ -1425,23 +1634,46 @@ class Game:
             if self.wrap_dist(s.x, s.y, foe.x, foe.y) < foe.r * 0.8 + \
                     Ship.RADIUS:
                 if s.invuln <= 0:
-                    self.kill_ship()
+                    self.hurt()
                     # Ramming a capital ship hurts it; it does not kill it.
                     for _ in range(3 if foe.boss else foe.hp):
                         if foe.hit():
                             self.kill_foe(foe, award=False)
                             break
+                    self.rage_check(foe)
                 return
         for b in list(self.bullets):
             if b.hostile and self.wrap_dist(s.x, s.y, b.x, b.y) < Ship.RADIUS + 2:
                 self.bullets.remove(b)
                 if s.invuln <= 0:
-                    self.kill_ship()
+                    self.hurt()
                 return
 
+    def collect(self, kind):
+        """Take a pickup aboard."""
+        spec = ITEMS[kind]
+        if kind in WEAPONS:
+            # A fresh magazine of the same type tops it up rather than
+            # resetting it, so a lucky double drop is not wasted.
+            self.ammo = (self.ammo if self.weapon == kind else 0)
+            self.ammo += spec["ammo"]
+            self.weapon = kind
+            self.fire_cd = 0.0
+            self.flash(spec["name"], 1.1)
+        elif kind == "shield":
+            self.ship.shield = True
+            self.flash("SHIELD UP", 1.1)
+        elif kind == "bomb":
+            self.bombs = min(self.BOMB_MAX, self.bombs + 1)
+            self.flash("BOMB  x%d" % self.bombs, 1.1)
+        elif kind == "life":
+            self.lives += 1
+            self.flash("EXTRA SHIP", 1.4)
+            beep()
+
     def split(self, a, award=True):
-        if award:
-            self.add_score(a.points, a.x, a.y, A("ast%d" % a.size))
+        if award:      # rocks ride the multiplier but do not extend the chain
+            self.award(a.points, a.x, a.y, A("ast%d" % a.size))
         self.burst(a.x, a.y, 6 + 7 * a.size, 30 + 22 * a.size, 0.5 + 0.1 * a.size)
         self.shocks.append(Shock(a.x, a.y, a.r * 0.5, a.r * 2.4,
                                  0.22 + 0.08 * a.size))
@@ -1466,13 +1698,13 @@ class Game:
             return
         self.foes.remove(foe)
         if award:
-            self.add_score(foe.value, foe.x, foe.y, A(foe.col))
-            # Wrecks give up their magazines. A capital ship gives up several.
+            self.chain()
+            self.award(foe.value, foe.x, foe.y, A(foe.col))
+            # Wrecks give up their salvage. A capital ship gives up several.
             drops = (3 if foe.kind == "dread" else 2) if foe.boss else (
                 1 if random.random() < self.DROP.get(foe.kind, 0.0) else 0)
             for _ in range(drops):
-                self.pickups.append(
-                    Pickup(foe.x, foe.y, random.choice(WEAPON_KINDS)))
+                self.pickups.append(Pickup(foe.x, foe.y, self.loot()))
         n = int(18 + foe.r * 2.4)
         self.burst(foe.x, foe.y, n, 70 + foe.r * 3.0, 0.7 + foe.r * 0.03)
         self.shocks.append(Shock(foe.x, foe.y, foe.r * 0.4, foe.r * 3.2,
@@ -1482,6 +1714,7 @@ class Game:
             self.shocks.append(Shock(foe.x, foe.y, 2, foe.r * 5.5, 0.9))
             self.flash("%s DOWN" % ("DREADNOUGHT" if foe.kind == "dread"
                                     else "MARAUDER"), 2.0)
+            beep()
             for _ in range(6):     # the hull comes apart
                 a = random.uniform(0, TAU)
                 sp = random.uniform(18, 55)
@@ -1504,8 +1737,11 @@ class Game:
         self.shocks.append(Shock(s.x, s.y, 3, 46, 0.65))
         self.shake = 0.45
         self.ship = None
-        self.weapon, self.ammo = None, 0     # the magazine goes with the ship
+        # The magazine stays with you. Losing a ship is punishment enough,
+        # and a fresh ship with an empty gun is a second death waiting.
+        self.combo = 0                        # the chain does not survive it
         self.lives -= 1
+        beep()
         self.state = "dead"
         self.timer = 1.7
         self.flash("SHIP LOST" if self.lives > 0 else "GAME OVER", 1.5)
@@ -1596,6 +1832,15 @@ class Game:
         if self.lives > 0 and x + self.lives * 2 + 2 < w - 24:
             sc.text(x, 0, " " + " ".join("▲" * self.lives) + " ", A("ship"))
             x += self.lives * 2 + 2
+        if self.combo and x + 12 < w - 30:
+            # The chain: its multiplier, and how long it has left to live.
+            m = self.mult()
+            cells = 4
+            full = int(round(cells * self.combo_t / self.COMBO_WINDOW))
+            full = max(0, min(cells, full))
+            tag = "x%d %s" % (m, BAR_FULL * full + BAR_EMPTY * (cells - full))
+            sc.text(x, 0, " " + tag + " ", A("accent") if m > 1 else A("dim"))
+            x += len(tag) + 2
         boss = next((f for f in self.foes if f.boss), None)
         left_over = len(self.foes) + len(self.queue)
         mid = "WAVE %d" % self.level
@@ -1626,6 +1871,15 @@ class Game:
                 sc.text(left, y, " %s " % tag, A(spec["col"]))
                 left += len(tag) + 2
         s = self.ship
+        gear = []
+        if self.bombs:
+            gear.append(("BOMB " + "*" * self.bombs, A("warn")))
+        if s is not None and s.shield:
+            gear.append(("SHIELD", A("ui_hi")))
+        for tag, attr in gear:
+            if left + len(tag) + 2 < self.sw - 26:
+                sc.text(left, y, " %s " % tag, attr)
+                left += len(tag) + 2
         charge = 1.0 if s is None else 1.0 - s.warp_cd / 3.0
         bars = max(0, min(4, int(charge * 4 + 0.001)))
         warp = "WARP " + BAR_FULL * bars + BAR_EMPTY * (4 - bars)
@@ -1636,13 +1890,14 @@ class Game:
                     A("ui_hi") if bars == 4 else A("dim"))
         hints = [
             ("↑↓←→ hold to fly  YUBN diagonal  guns fire themselves"
-             "  X warp  M model  P pause  Q quit"
+             "  X warp  Z bomb  M model  P pause  Q quit"
              if self.mode == "arcade" else
-             "←→ turn  ↑ thrust  guns automatic  X warp  M model  Q quit"),
-            ("↑↓←→ fly  YUBN diagonal  auto guns  X warp  M model  Q quit"
+             "←→ turn  ↑ thrust  guns automatic  X warp  Z bomb"
+             "  M model  Q quit"),
+            ("↑↓←→ fly  YUBN diagonal  auto guns  X warp  Z bomb  Q quit"
              if self.mode == "arcade" else
-             "←→ turn  ↑ thrust  auto guns  X warp  Q quit"),
-            "FLY · WARP",
+             "←→ turn  ↑ thrust  auto guns  X warp  Z bomb  Q quit"),
+            "FLY · WARP · BOMB",
         ]
         gap = right - left
         for hint in hints:
@@ -1667,6 +1922,10 @@ class Game:
         tag = " a t t r a c t   m o d e "
         if len(tag) + 6 < self.sw:
             sc.text((self.sw - len(tag)) // 2, y, tag, A("dim"))
+        # Whether the terminal tells us about key releases, or we guess.
+        keys = " KEYS %s " % ("exact" if self.exact_keys else "inferred")
+        if len(tag) + 2 * len(keys) + 8 < self.sw:
+            sc.text(2, y, keys, A("ui_hi") if self.exact_keys else A("dim"))
 
     def draw_banner(self, sc):
         if self.msg_t <= 0:
@@ -1745,11 +2004,15 @@ class Game:
             (5, "interceptor 150   gunship 400   rocks 20/50/100", A("dim")),
             (6, "MARAUDER every 5th wave 2500   DREADNOUGHT every 10th 12000",
              A("warn")),
+            (7, "wrecks drop magazines and gear:  O shield   * bomb (Z)"
+                "   + ship", A("dim")),
+            (8, "chain kills for up to x5  -  lose a ship and it resets",
+             A("dim")),
         ]
         if self.high:
-            rows.append((7, "high score  %d" % self.high, A("accent")))
+            rows.append((9, "high score  %d" % self.high, A("accent")))
         pulse = math.sin(time.time() * 4.0) > 0
-        rows.append((9, "───  PRESS  SPACE  TO  LAUNCH  ───",
+        rows.append((11, "───  PRESS  SPACE  TO  LAUNCH  ───",
                      A("warn") if pulse else A("dim")))
         for dy, text, attr in rows:
             self.matte(sc, y + dy, len(text))
@@ -1764,6 +2027,7 @@ class Game:
             "score      %d" % self.score,
             "waves      %d" % self.level,
             "accuracy   %.0f%%" % acc,
+            "chain      %d" % self.best_combo,
             "high       %d" % self.high,
             "",
             "R  play again        Q  quit",
@@ -1773,6 +2037,48 @@ class Game:
 # ==========================================================================
 # Main loop
 # ==========================================================================
+PRESS, REPEAT, RELEASE = 1, 2, 3        # key event types, kitty numbering
+
+# The kitty keyboard protocol, spoken by kitty, Ghostty, WezTerm, foot, rio
+# and others: ask for it and the terminal reports every key as an escape
+# sequence with a press/repeat/release type on it. Flags 1|2|8 - disambiguate
+# escapes, report event types, report all keys as escape codes. Pushed on the
+# way in, popped on the way out so the shell gets its keyboard back.
+KITTY_PUSH = "\x1b[>11u"
+KITTY_POP = "\x1b[<u"
+KITTY_QUERY = "\x1b[?u\x1b[c"
+
+
+def tty_write(s):
+    try:
+        sys.stdout.write(s)
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        pass
+
+
+def kitty_probe(stdscr, wait=0.4):
+    """Does this terminal speak the kitty keyboard protocol?
+
+    `CSI ? u` is answered with `CSI ? flags u` by one that does, and ignored
+    by one that does not - so it is chased with a primary device attributes
+    query, which every terminal answers, and the wait ends on that reply
+    rather than on the timeout.
+    """
+    tty_write(KITTY_QUERY)
+    buf, t0 = [], time.perf_counter()
+    while time.perf_counter() - t0 < wait:
+        c = stdscr.getch()
+        if c == -1:
+            if buf and buf[-1] == ord("c"):      # the DA reply is in
+                break
+            time.sleep(0.005)
+            continue
+        if c < 256:
+            buf.append(c)
+    return re.search(r"\x1b\[\?\d+u", "".join(map(chr, buf))) is not None
+
+
 KEYMAP = {
     curses.KEY_LEFT: ("left",), ord("a"): ("left",), ord("A"): ("left",),
     curses.KEY_RIGHT: ("right",), ord("d"): ("right",), ord("D"): ("right",),
@@ -1842,6 +2148,18 @@ class Keys:
         self.gap = self.REPEAT / 2.6                  # learned repeat period
         self.last_gap = dict.fromkeys(self.DIRS, 0.0)  # for spotting a train
         self.now = 0.0
+        # Under the kitty keyboard protocol none of the guessing above is
+        # needed: the terminal says when a key goes up, so a direction is
+        # held while any key mapped to it is down, and that is all.
+        self.exact = False
+        self.down = dict.fromkeys(self.DIRS, 0)       # keys holding each
+        self.seen = dict.fromkeys(self.DIRS, -9.0)    # last press/repeat
+        self.saw_repeat = False
+
+    # Exact mode: a release can still go missing - focus lost mid-hold, say.
+    # Once this terminal has shown it repeats held keys, a key that has gone
+    # quiet for far longer than any repeat period is not held any more.
+    STUCK = 1.5
 
     @property
     def first(self):
@@ -1861,8 +2179,14 @@ class Keys:
         """All stop: forget every direction, held or carried."""
         for name in self.DIRS:
             self.real[name] = self.hold[name] = self.carried[name] = -9.0
+            self.down[name] = 0
 
-    def press(self, names, now):
+    def press(self, names, now, event=PRESS):
+        if self.exact:
+            self._exact(names, now, event)
+            return
+        if event == RELEASE:          # cannot happen without the protocol
+            return
         for name in names:
             fresh = now >= self.hold[name]
             # A press this soon after the last one is a repeat, whether or not
@@ -1895,8 +2219,22 @@ class Keys:
                 self.real[opp] = self.hold[opp] = self.carried[opp] = -9.0
         self._carry(now, self.CARRY, skip=names)
 
+    def _exact(self, names, now, event):
+        for name in names:
+            if event == RELEASE:
+                self.down[name] = max(0, self.down[name] - 1)
+            elif event == REPEAT:
+                self.down[name] = max(1, self.down[name])
+                self.seen[name] = now
+                self.saw_repeat = True
+            else:
+                self.down[name] += 1
+                self.seen[name] = now
+
     def other(self, now, skip=()):
         """Any key event at all keeps recently-pressed directions alive."""
+        if self.exact:
+            return                    # nothing to keep alive: holds are real
         self._carry(now, self.CARRY_OTHER, skip=skip)
 
     def _carry(self, now, window, skip=()):
@@ -1913,6 +2251,13 @@ class Keys:
         the key really was released it reads as ordinary drift.
         """
         now = self.now
+        if self.exact:
+            if self.down[name] <= 0:
+                return 0.0
+            if self.saw_repeat and now - self.seen[name] > self.STUCK:
+                self.down[name] = 0           # a release we never saw
+                return 0.0
+            return 1.0
         live = self.hold[name]
         if now < live:
             v = 1.0
@@ -1932,13 +2277,19 @@ class Keys:
 
 
 class Reader:
-    """Drain curses input, re-assembling arrow sequences by hand.
+    """Drain curses input, re-assembling escape sequences by hand.
 
     With nodelay set, ncurses hands back a bare ESC rather than block waiting
     for the rest of a sequence, so on plenty of terminals an arrow key arrives
     as 27 '[' 'C' instead of KEY_RIGHT. Left alone that reads as three unknown
     keys - the ship never moves on arrows, or moves only on the presses that
     happened to be assembled, which is indistinguishable from a stutter.
+
+    Under the kitty keyboard protocol every key is a CSI sequence too, and it
+    carries an event type - press, repeat or release - that ncurses knows
+    nothing about. Reassembling here is what makes both work.
+
+    read() yields (key, event) pairs: key is an ncurses code or a codepoint.
     """
 
     ARROW = {65: curses.KEY_UP, 66: curses.KEY_DOWN,
@@ -1959,21 +2310,72 @@ class Reader:
             self.t = now
         out, b, i = [], self.buf, 0
         while i < len(b):
-            c = b[i]
-            if c != 27:
-                out.append(c)
+            if b[i] != 27:
+                out.append((b[i], PRESS))
                 i += 1
-            elif len(b) - i >= 3 and b[i + 1] in (91, 79):
-                key = self.ARROW.get(b[i + 2])
-                out.append(key if key is not None else 27)
-                i += 3 if key is not None else 1
-            elif len(b) - i < 3 and now - self.t < self.PARTIAL:
-                break                      # still arriving - keep it for next
-            else:
-                out.append(27)             # a real, lone Escape
-                i += 1
+                continue
+            got = self._seq(b, i)
+            if got is None:                    # still arriving...
+                if now - self.t < self.PARTIAL:
+                    break                      # ...keep it for next time
+                got = (1, 27, PRESS)           # ...or it was a lone Escape
+            n, key, ev = got
+            if key is not None:
+                out.append((key, ev))
+            i += n
         self.buf = b[i:]
         return out
+
+    def _seq(self, b, i):
+        """Decode one escape sequence starting at b[i] (the ESC).
+
+        Returns (length, key, event) - key None for a sequence to ignore -
+        or None when the sequence is not all here yet.
+        """
+        n = len(b)
+        if i + 1 >= n:
+            return None
+        lead = b[i + 1]
+        if lead == 79:                          # SS3: ESC O A on some terms
+            if i + 2 >= n:
+                return None
+            key = self.ARROW.get(b[i + 2])
+            return (3, key, PRESS) if key else (1, 27, PRESS)
+        if lead != 91:                          # not CSI: a lone Escape
+            return (1, 27, PRESS)
+        j = i + 2
+        while j < n and 0x30 <= b[j] <= 0x3F:   # parameter bytes
+            j += 1
+        while j < n and 0x20 <= b[j] <= 0x2F:   # intermediate bytes
+            j += 1
+        if j >= n:
+            return None
+        final = b[j]
+        if not 0x40 <= final <= 0x7E:           # not a sequence after all
+            return (1, 27, PRESS)
+        params = "".join(map(chr, b[i + 2:j]))
+        key, ev = self._decode(params, final)
+        return (j - i + 1, key, ev)
+
+    def _decode(self, params, final):
+        fields = params.split(";")
+        ev, mods = PRESS, 0
+        if len(fields) > 1 and fields[1]:       # "mods:event", both optional
+            m, _, e = fields[1].partition(":")
+            mods = int(m) - 1 if m.isdigit() else 0
+            if e.isdigit():
+                ev = int(e)
+        if final == 117:                        # 'u': CSI codepoint ; mods u
+            code = fields[0].partition(":")[0]  # "97:65" is a, shifted to A
+            if not code.isdigit():
+                return None, ev                 # the protocol reply itself
+            code = int(code)
+            if mods & 4 and code in (99, 67):   # ctrl-C: a key, not a signal
+                code = 3
+            return code, ev
+        if final in self.ARROW:                 # CSI A, or CSI 1;mods:ev A
+            return self.ARROW[final], ev
+        return None, ev                         # DA reply, page keys, mice
 
 
 def run(stdscr):
@@ -1994,6 +2396,16 @@ def run(stdscr):
     game = Game(w, h)
     keys = Keys()
     reader = Reader(stdscr)
+    if kitty_probe(stdscr):
+        tty_write(KITTY_PUSH)
+        keys.exact = game.exact_keys = True
+    try:
+        loop(stdscr, game, keys, reader)
+    finally:
+        tty_write(KITTY_POP)
+
+
+def loop(stdscr, game, keys, reader):
     prev_state = game.state
     now = time.perf_counter()
     last = now
@@ -2003,7 +2415,7 @@ def run(stdscr):
         dt = min(now - last, 0.06)
         last = now
 
-        for c in reader.read(now):
+        for c, ev in reader.read(now):
             if c == curses.KEY_RESIZE:
                 h, w = stdscr.getmaxyx()
                 if w >= MIN_W and h >= MIN_H:
@@ -2011,16 +2423,22 @@ def run(stdscr):
                     stdscr.erase()
                 continue
             if c in KEYMAP:
-                keys.press(KEYMAP[c], now)
+                keys.press(KEYMAP[c], now, ev)
+                continue
+            # Of anything else only a fresh press counts: a held P must not
+            # flicker the pause, and a release is not a press at all.
+            if ev != PRESS:
                 continue
             # Any other key keeps the current heading alive, so firing,
             # warping or pausing never stalls the ship.
             keys.other(now)
-            if c in (ord("q"), ord("Q")):
-                if game.score > game.high:
-                    game.high = game.score
+            if c in (ord("q"), ord("Q"), 3):     # 3: ctrl-C, when the
+                if game.score > game.high:       # terminal hands it to us
+                    game.high = game.score       # as a key, not a signal
                 game.save_state()
                 return
+            elif c in (ord("z"), ord("Z")):
+                game.bomb()
             elif c in (ord("p"), ord("P")):
                 if game.state == "play":
                     game.state = "paused"
@@ -2095,6 +2513,10 @@ def selftest(frames=1500):
             g.queue = []
         if i == 250:
             g.toggle_mode()
+        if i == 350 and g.ship:            # gear: a shield, then a bomb
+            g.collect("shield")
+            g.collect("bomb")
+            g.bomb()
         if i == 400:
             g.resize(60, 20)
         if i == 800:
@@ -2136,13 +2558,29 @@ def keytest(stdscr):
     log, last, prev_gap = [], {}, {}
     delays, periods = [], []
     reader = Reader(stdscr)
+    kitty = kitty_probe(stdscr)
+    if kitty:
+        tty_write(KITTY_PUSH)
+    try:
+        return keytest_loop(stdscr, reader, kitty, named, log, last,
+                            prev_gap, delays, periods)
+    finally:
+        tty_write(KITTY_POP)
+
+
+def keytest_loop(stdscr, reader, kitty, named, log, last, prev_gap, delays,
+                 periods):
     t0 = time.perf_counter()
     while True:
         now = time.perf_counter()
-        for c in reader.read(now):
-            if c in (ord("q"), ord("Q")):
+        for c, ev in reader.read(now):
+            if c in (ord("q"), ord("Q")) and ev == PRESS:
                 return delays, periods
             name = named.get(c) or (chr(c) if 32 <= c < 127 else "#%d" % c)
+            if ev == RELEASE:
+                log.append((now - t0, name + " up", None))
+                del log[:-400]
+                continue
             gap = now - last[name] if name in last else None
             if gap is not None and 0.0 < gap < 0.25:
                 periods.append(gap)
@@ -2165,6 +2603,9 @@ def keytest(stdscr):
         ]
         med = sorted(periods)[len(periods) // 2] if periods else None
         dly = sorted(delays)[len(delays) // 2] if delays else None
+        rows.append("key releases  %s" % (
+            "reported (kitty keyboard protocol) - holds are exact"
+            if kitty else "not reported - holds are inferred from repeats"))
         rows.append("events seen   %d" % len(log))
         rows.append("repeat rate   %s" % (
             "%.0f/s  (one every %.0f ms)" % (1.0 / med, med * 1000)
@@ -2212,6 +2653,8 @@ def report_keytest(delays, periods):
 
 
 def main():
+    if "--mute" in sys.argv:
+        SOUND[0] = False
     if "--selftest" in sys.argv:
         selftest()
         return
