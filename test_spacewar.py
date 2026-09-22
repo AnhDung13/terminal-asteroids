@@ -15,6 +15,7 @@ os.environ["SPACEWAR_STATE"] = os.path.join(tempfile.gettempdir(),
 import curses                                                   # noqa: E402
 import spacewar as ast                                          # noqa: E402
 from spacewar import (Game, Keys, Reader, Bullet, Raider, Ship,    # noqa: E402
+                      Asteroid, Mine, Sun, SECTORS, SECTOR_CYCLE,
                       PRESS, REPEAT, RELEASE)
 
 
@@ -31,6 +32,16 @@ class FakeScreen:
 def game():
     g = Game(110, 34)
     g.start_game()
+    return g
+
+
+def hold(g):
+    """Park the wave: no fleet on the field, one still to come, never
+    arriving - so nothing spawns and no wave ends under the test."""
+    g.foes, g.queue, g.spawn_cd = [], ["scout"], 99.0
+    g.asteroids, g.bullets, g.pickups, g.mines = [], [], [], []
+    g.ship.x, g.ship.y = 150.0, 100.0
+    g.ship.invuln = 0.0
     return g
 
 
@@ -234,6 +245,292 @@ class RockCoverTests(unittest.TestCase):
         self.assertEqual(g.bullets, [])
         self.assertIn(a, g.asteroids)
         self.assertGreater(a.flash, 0)
+
+
+class HotRockTests(unittest.TestCase):
+    def test_shot_kicks_fragments_hot_along_the_shot(self):
+        g = hold(game())
+        a = Asteroid(60, 60, 3, 1.0)
+        g.asteroids = [a]
+        g.bullets = [Bullet(60, 60, 190, 0, 5)]
+        g.collisions()
+        self.assertNotIn(a, g.asteroids)
+        self.assertEqual(len(g.asteroids), 2)
+        for c in g.asteroids:
+            self.assertGreater(c.hot, 0)
+            self.assertGreater(c.vx, 60)          # flying with the shot
+
+    def test_ramming_does_not_kick(self):
+        g = hold(game())
+        a = Asteroid(60, 60, 3, 1.0)
+        g.asteroids = [a]
+        g.split(a, award=False)
+        for c in g.asteroids:
+            self.assertEqual(c.hot, 0)
+
+    def test_hot_fragment_hurts_a_hull_and_shatters(self):
+        g = hold(game())
+        a = Asteroid(50, 50, 2, 1.0)
+        a.kick(1, 0)
+        g.asteroids = [a]
+        gun = Raider("gunship", 55, 50, 0.0, g.world)
+        gun.arrive = 0
+        g.foes = [gun]
+        g.collisions()
+        self.assertNotIn(a, g.asteroids)
+        self.assertNotIn(gun, g.foes)             # 2 hull points, 2 hp
+
+    def test_cool_rock_is_harmless(self):
+        g = hold(game())
+        a = Asteroid(50, 50, 2, 1.0)
+        g.asteroids = [a]
+        gun = Raider("gunship", 55, 50, 0.0, g.world)
+        gun.arrive = 0
+        g.foes = [gun]
+        g.collisions()
+        self.assertIn(a, g.asteroids)
+        self.assertIn(gun, g.foes)
+        self.assertEqual(gun.hp, gun.hp0)
+
+    def test_fragment_cools_and_slows(self):
+        a = Asteroid(50, 50, 1, 1.0)
+        a.kick(0, 1)
+        fast = abs(a.vy)
+        for _ in range(6 * 60):
+            a.update(1 / 60, (400, 200))
+        self.assertEqual(a.hot, 0)
+        self.assertLess(abs(a.vy), fast * 0.5)
+
+
+class TenderTests(unittest.TestCase):
+    def test_tender_rides_every_third_wave_mid_pack(self):
+        g = game()
+        g.level = 3
+        r = g.roster()
+        self.assertEqual(r.count("tender"), 1)
+        self.assertNotEqual(r[0], "tender")
+        g.level = 4
+        self.assertNotIn("tender", g.roster())
+        g.level = 5
+        self.assertNotIn("tender", g.roster())        # never on a boss wave
+
+    def test_tender_flees(self):
+        g = hold(game())
+        t = Raider("tender", 190, 100, 0.0, g.world)
+        t.arrive = 0
+        g.foes = [t]
+        x0 = t.x
+        for _ in range(60):
+            g.update(1 / 60, Keys())
+        self.assertGreater(t.x, x0)                  # away from the ship
+        self.assertFalse(any(b.hostile for b in g.bullets))   # no gun
+        self.assertLess(t.escape, t.escape0)
+
+    def test_escape_books_a_gunship(self):
+        g = hold(game())
+        t = Raider("tender", 190, 100, 0.0, g.world)
+        t.arrive, t.escape = 0, 0.001
+        g.foes = [t]
+        g.update(0.01, Keys())
+        self.assertNotIn(t, g.foes)
+        self.assertEqual(g.debt, 1)
+        g.level = 2
+        self.assertEqual(g.roster().count("gunship"), 1)
+        g.spawn_wave()
+        self.assertEqual(g.debt, 0)                  # paid
+
+    def test_tender_always_drops(self):
+        g = hold(game())
+        t = Raider("tender", 60, 60, 0.0, g.world)
+        g.foes = [t]
+        g.kill_foe(t)
+        self.assertEqual(len(g.pickups), Game.TENDER_DROPS)
+
+    def test_tender_jumps_sooner_on_late_waves(self):
+        self.assertLess(Raider("tender", 0, 0, 1.0).escape0,
+                        Raider("tender", 0, 0, 0.0).escape0)
+
+
+class AimMarkTests(unittest.TestCase):
+    def test_leading_gunner_marks_its_aim_just_before_firing(self):
+        w = (400, 200)
+        s = Ship(100, 50)
+        s.vx = 50.0
+        gun = Raider("gunship", 0, 50, 0.0, w)
+        gun.arrive, gun.cd = 0, 0.2
+        gun.update(1 / 120, w, s, [])
+        self.assertIsNotNone(gun.mark)
+        self.assertGreater(gun.mark[0], s.x)        # ahead of the ship
+        gun.cd = 1.0
+        gun.update(1 / 120, w, s, [])
+        self.assertIsNone(gun.mark)
+
+    def test_direct_gunner_never_marks(self):
+        w = (400, 200)
+        scout = Raider("scout", 0, 50, 0.0, w)
+        scout.arrive, scout.cd = 0, 0.1
+        scout.update(1 / 120, w, Ship(100, 50), [])
+        self.assertIsNone(scout.mark)
+
+
+class WaveBreakTests(unittest.TestCase):
+    def test_fleet_down_starts_a_break_then_the_next_wave(self):
+        g = game()
+        g.foes, g.queue = [], []
+        lv = g.level
+        g.update(1 / 60, Keys())
+        self.assertIsNotNone(g.break_t)
+        self.assertEqual(g.level, lv)
+        self.assertEqual(g.card[0], "WAVE %d CLEAR" % lv)
+        for _ in range(int(Game.BREAK * 60) + 2):
+            g.update(1 / 60, Keys())
+        self.assertEqual(g.level, lv + 1)
+        self.assertIsNone(g.break_t)
+
+    def test_boss_break_is_longer_and_names_the_sector(self):
+        g = game()
+        g.level = 10
+        g.foes, g.queue = [], []
+        g.update(1 / 60, Keys())
+        self.assertGreater(g.break_t, Game.BREAK)
+        nxt = SECTORS[g.sector(11)]["name"]
+        self.assertTrue(any(nxt in line for line in g.card))
+
+    def test_card_counts_the_wave(self):
+        g = hold(game())
+        f = Raider("scout", 60, 60, 0.0, g.world)
+        g.foes = [f]
+        g.kill_foe(f)
+        g.queue = []
+        g.update(1 / 60, Keys())
+        self.assertIn("1 ships", g.card[1])
+
+
+class SectorTests(unittest.TestCase):
+    def test_open_space_for_the_first_ten_waves(self):
+        g = game()
+        for lv in range(1, 11):
+            self.assertEqual(g.sector(lv), "open")
+        self.assertNotEqual(g.sector(11), "open")
+        self.assertEqual(g.sector(11), g.sector(20))
+        self.assertNotEqual(g.sector(11), g.sector(21))
+
+    def test_every_rule_comes_round_once_in_forty_waves(self):
+        g = game()
+        seen = {g.sector(lv) for lv in (11, 21, 31, 41)}
+        self.assertEqual(seen, set(SECTOR_CYCLE))
+
+    def jump(self, g, name):
+        g.sector_order = [name] + [s for s in SECTOR_CYCLE if s != name]
+        g.level = 10
+        g.foes, g.queue = [], []
+        g.begin_break()
+        g.break_t = 0.001
+        g.update(1 / 60, Keys())
+        self.assertEqual(g.cur, name)
+        return g
+
+    def test_jump_clears_the_field_and_keeps_salvage(self):
+        g = hold(game())
+        g.asteroids = [Asteroid(30, 30, 3, 1.0)]
+        g.pickups = [ast.Pickup(30, 30, "bomb")]
+        g.bullets = [Bullet(1, 1, 0, 0, 5, hostile=True)]
+        self.jump(g, "nebula")
+        self.assertFalse(any(b.hostile for b in g.bullets))
+        self.assertEqual(len(g.pickups), 1)
+        self.assertEqual(len(g.asteroids), g.rock_count())   # fresh rocks
+
+    def test_nebula_fogs_the_far_field(self):
+        g = self.jump(hold(game()), "nebula")
+        g.ship.x, g.ship.y = 100, 60
+        self.assertFalse(g.fogged(110, 60))
+        self.assertTrue(g.fogged(100 + g.vis() + 5, 60))
+        g.cur = "open"
+        self.assertFalse(g.fogged(100 + g.vis() + 5, 60))
+
+    def test_debris_field_has_more_rocks_and_keeps_them_coming(self):
+        g = self.jump(hold(game()), "debris")
+        g.level = 11
+        n = g.rock_count()
+        g.cur = "open"
+        self.assertGreater(n, g.rock_count())
+        g.cur = "debris"
+        g.asteroids = []
+        g.rock_cd = 0.0
+        g.update(1 / 60, Keys())
+        self.assertEqual(len(g.asteroids), 1)
+
+    def test_minefield_lays_mines_and_a_shot_sets_one_off(self):
+        g = self.jump(hold(game()), "mines")
+        self.assertEqual(len(g.mines), g.mine_count())
+        g.mines = [Mine(60, 60)]
+        gun = Raider("gunship", 70, 60, 0.0, g.world)
+        gun.arrive = 0
+        g.foes = [gun]
+        g.bullets = [Bullet(60, 60, 0, 0, 5)]
+        g.collisions()
+        self.assertEqual(g.mines, [])
+        self.assertNotIn(gun, g.foes)             # 3 hull points, 2 hp
+        self.assertEqual(g.hits, 1)
+
+    def test_hostile_rounds_do_not_trip_mines(self):
+        g = self.jump(hold(game()), "mines")
+        g.mines = [Mine(60, 60)]
+        g.bullets = [Bullet(60, 60, 0, 0, 5, hostile=True)]
+        g.collisions()
+        self.assertEqual(len(g.mines), 1)
+
+    def test_mine_near_the_ship_is_fatal(self):
+        g = self.jump(hold(game()), "mines")
+        g.mines = [Mine(150, 100)]
+        g.ship.x, g.ship.y = 150, 100
+        g.collisions()
+        self.assertIsNone(g.ship)
+
+    def test_mines_chain(self):
+        g = self.jump(hold(game()), "mines")
+        g.mines = [Mine(60, 60), Mine(75, 60), Mine(90, 60), Mine(180, 60)]
+        g.bullets = [Bullet(60, 60, 0, 0, 5)]
+        g.collisions()
+        self.assertEqual(len(g.mines), 1)
+
+    def test_star_pulls_and_burns(self):
+        g = self.jump(hold(game()), "star")
+        self.assertIsInstance(g.sun, Sun)
+        w = g.world
+        b = Bullet(g.sun.x + 60, g.sun.y, 0, 0, 5)
+        g.bullets = [b]
+        g.foes = [Raider("scout", g.sun.x + 100, g.sun.y, 0.0, w)]
+        g.foes[0].arrive = 0
+        for _ in range(60):
+            g.gravity(1 / 60)
+        self.assertLess(b.vx, 0)                      # falling inward
+        ax, ay = g.sun.pull(g.sun.x + 100, g.sun.y, w)
+        self.assertAlmostEqual(ax, -Sun.G / 100 ** 2, places=6)
+        self.assertLessEqual(abs(g.sun.pull(g.sun.x + 2, g.sun.y, w)[0]),
+                             Sun.MAX_PULL)
+        g.bullets = [Bullet(g.sun.x, g.sun.y, 0, 0, 5)]
+        g.gravity(1 / 60)
+        self.assertEqual(g.bullets, [])
+
+    def test_star_kills_the_ship_and_spares_the_spawn(self):
+        g = self.jump(hold(game()), "star")
+        x, y = g.spawn_point()
+        self.assertGreater(g.wrap_dist(x, y, g.sun.x, g.sun.y),
+                           g.sun.r * 3)
+        g.ship.x, g.ship.y = g.sun.x, g.sun.y
+        g.gravity(1 / 60)
+        self.assertIsNone(g.ship)
+
+    def test_fleet_steers_clear_of_the_star(self):
+        w = (400, 200)
+        sun = Sun(w)
+        s = Ship(sun.x + 150, sun.y)              # bait on the far side
+        f = Raider("scout", sun.x - 40, sun.y, 0.0, w)
+        f.arrive = 0
+        for _ in range(4 * 120):
+            f.update(1 / 120, w, s, [], sun)
+            self.assertFalse(sun.inside(f.x, f.y, w))
 
 
 class RaiderTests(unittest.TestCase):

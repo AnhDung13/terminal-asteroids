@@ -2,9 +2,11 @@
 
 A space combat game that runs in your terminal, in a single Python file with
 no dependencies beyond the standard library. You fly one ship against a hostile
-fleet — interceptors, gunships, and a capital ship every fifth wave. The
-asteroids are still there, but they are weather now: something to dodge while
-you fight, not the thing you are fighting.
+fleet — interceptors, gunships, an unarmed tender that runs from you, and a
+capital ship every fifth wave — and after every tenth wave the fleet jumps to
+a new sector of space with one rule of its own. The asteroids are still there,
+but they are weather now: something to dodge while you fight, not the thing
+you are fighting — until you shoot one, and the fragments are yours.
 
 The play field is a real pixel buffer: every character cell carries a 2×4 grid
 of Unicode braille dots, which gives 8× the resolution of character graphics —
@@ -116,6 +118,7 @@ rather than a trigger pull.
 | Small asteroid | 1 | 100 |
 | Interceptor — fast, darts and circles | 1 | 150 |
 | Gunship — twin nacelles, fires pairs | 2 | 400 |
+| Tender — unarmed hauler, runs, and jumps out if you let it | 3 | 600 |
 | **Marauder** — mini boss, every 5th wave | 11 | 2,500 |
 | **Dreadnought** — boss, every 10th wave | 28 | 12,000 |
 
@@ -132,6 +135,17 @@ the next one. Ramming a fighter kills you and it both; ramming a capital ship
 only dents it. Game over reports your score, waves survived, shooting accuracy
 and your longest chain.
 
+**Rocks are ammunition.** When one of your shots splits a rock, the two
+fragments fly off *along the shot* — fast, hot, drawn in fire colours with a
+streak behind them — and for a second and a half a hot fragment hurts the first
+hull it meets: three hull points for a large fragment, two for a medium, one
+for a small. The fragment shatters on impact and scores its own points on the
+way. A medium chunk kills a gunship outright. Then it cools, sheds the speed,
+and is weather again. Shooting the boulder in front of a gunship rather than
+flying round it is now a decision with a payoff, and so is lining a rock up
+between you and a Marauder before you open fire. Fragments knocked loose by
+your own hull are not hot — ramming is still just ramming.
+
 **The chain.** Every ship you down extends a chain, and the chain sets a
 multiplier on everything you score: ×2 after three kills, ×3 after six, up to
 ×5. Go five seconds without a kill, or lose a ship, and it resets to ×1. Rocks
@@ -142,8 +156,9 @@ attack rather than snipe from across the field.
 ## Weapons
 
 Your own gun is one bolt at a time. Anything better has to be taken off a
-wreck: an interceptor drops salvage 10% of the time, a gunship 26%, and a
-capital ship always gives up two or three pieces. Seven drops in ten are a
+wreck: an interceptor drops salvage 10% of the time, a gunship 26%, a tender —
+it is nothing but cargo — always gives up two pieces, and a capital ship two or
+three. Seven drops in ten are a
 magazine (a tumbling hex); the rest are gear (a diamond). Fly over one to take
 it aboard. One magazine at a time and it runs out, but it stays with you when
 you lose a ship — picking up the same type again tops the count up instead of
@@ -196,6 +211,23 @@ you. Beyond that, each class has one habit of its own:
   seven-round volleys and adds a full ring of sixteen slower rounds every few
   seconds, from all round the hull. The ring rotates and the gaps are wide:
   it is dodged by moving, not by luck. A bomb, if you have one, is for this.
+- **Tender** — the fleet's supply hauler, riding with every third ordinary
+  wave (3, 6, 9, 12…) and arriving mid-pack, never first. It has no gun. It
+  runs straight away from you, weaving, while its jump drive spools: a ring
+  round the hull fills in as the charge builds and blinks over the last
+  seconds, and a `TENDER JUMP` bar on the frame line shows the same thing.
+  Twelve seconds after it arrives (nine by wave 10) it is gone. Catch it and
+  it always drops two pieces of salvage; let it go and the *next* wave comes
+  with one more gunship in its escort. It is slower than you, but it is never
+  where the fight is, so the whole time you are chasing it the fight is
+  behind you.
+
+**The tell.** Any gunner that leads its target — the gunship, and the
+dreadnought's spinal battery — shows where the volley is going for the last
+three tenths of a second before it fires: a faint grey cross at the aim point,
+drawn under everything else. It is not a reticle for you to use. It is there
+so the rule *change course after it shoots* can be learned by watching rather
+than by dying, and once you have learned it you stop seeing it.
 
 ## Difficulty
 
@@ -219,15 +251,59 @@ you actually face is the whole fleet's fire overlapping.
 Ships arrive a few at a time rather than all at once, at most seven escorts on
 the field, and a capital ship is extra on top of that. The Marauder on wave 5
 is the first real wall — it is the first thing that will not die to one pass,
-and the first that comes to you rather than waiting.
+and the first that comes to you rather than waiting. Every tender that jumps
+out is paid for on the next wave, boss wave or not, with one more gunship.
+
+**Between waves** there is a breath: two seconds of quiet with the fleet gone
+and the rocks drifting on, and a card low on the screen with the wave just
+fought — how long it took, ships downed, hit rate, best chain, and ships lost
+if any. After a dreadnought the breath is four seconds, the card says `JUMP
+DRIVE CHARGING`, and it names the sector you are about to arrive in. Your gun
+keeps running through it; nothing hostile does.
+
+## Sectors
+
+The difficulty dial above is flat from wave 10. From there the *sector* is what
+changes: after every dreadnought the fleet jumps and you follow, into a region
+of space with one rule of its own. The first ten waves are open space. The four
+rules after that come round in a different order every run, so wave 11 is a
+fresh problem each time and the whole cycle takes forty waves. Salvage comes
+with you through a jump — it is cargo now — but the rocks stay behind, and so
+does anything the fleet had in the air.
+
+| Sector | The rule |
+| --- | --- |
+| **OPEN SPACE** | waves 1–10: the fleet, the rocks, and you |
+| **NEBULA** | sensors reach about a third of the way across the field, and a faint ring round your ship shows how far. Past it a hostile ship is a blinking dot in its own colour, its rounds are the faintest specks, and a rock is a dim outline. Your own shots you can always see. The star field goes violet |
+| **DEBRIS FIELD** | twice the rocks plus two, a quarter larger, and a fresh boulder drifts in off an edge every four seconds for as long as the field is short. More cover, more weather, and a great deal more ammunition |
+| **MINEFIELD** | four to nine proximity mines adrift across the field, blinking. Any hull within eleven pixels sets one off — yours or theirs — and so does one of your shots. The blast reaches thirty-four pixels, does three hull points to every ship inside it, kills you if you are inside it, and sets off any mine inside it too. The fleet's rounds pass straight through a mine: a minefield that cleared itself would be scenery. Shooting one out from under a gunship is the whole idea |
+| **GRAVITY WELL** | a star at the centre of the field pulls on everything that moves — rocks, rounds, salvage, the fleet and you — with an inverse-square field, capped so that a close pass is survivable and a straight line into it is not. Touch it and you are gone, though a shield throws you clear instead. Shots bend round it. Rocks and salvage that fall in flare and are lost; a hostile ship that falls in is your kill, chain and all, though its cargo burns. The fleet steers round it, hard — but a Marauder's charge does not steer, and a dreadnought's standoff orbit is wider than the field. You respawn above it, and hyperspace will never drop you in it |
+
+In arcade flight the keys command a velocity, so a pull on that velocity would
+be undone within a few frames; the star drags the *hull* instead, as a current
+you fly against. In classic flight it is plain acceleration, and there are
+still no brakes.
 
 ## What's in the renderer
 
-- Four hostile hulls — interceptor, gunship, Marauder, Dreadnought — each a
-  set of polylines in local coordinates, so one rotate-and-scale draws any of
-  them at any size and a silhouette is designed as a shape, not as code. Every
-  nozzle trails its own flickering engine bloom, and a capital ship fits
-  itself to the field so it cannot swallow a small terminal
+- Five hostile hulls — interceptor, gunship, tender, Marauder, Dreadnought —
+  each a set of polylines in local coordinates, so one rotate-and-scale draws
+  any of them at any size and a silhouette is designed as a shape, not as
+  code. Every nozzle trails its own flickering engine bloom, and a capital ship
+  fits itself to the field so it cannot swallow a small terminal. The tender is
+  the one hull drawn without bold: a plain long body with a cargo pod slung
+  either side, a jump-drive ring filling in round it, and engine plumes that
+  stretch as the drive charges
+- Hot rock fragments in fire colours with a three-dot streak behind them, and
+  the grey aim cross a leading gunner shows before it fires
+- Proximity mines as a small ring with four contact horns and a blinking arming
+  light; the gravity-well star as a bright three-ring core inside a corona of
+  loose arcs turning at different rates
+- Nebula fog: a violet star field, a faint ring at sensor range round your
+  ship, and everything past it reduced to blips
+- The between-waves card, a framed panel low on the screen with the wave's
+  numbers, and the `SECTOR 2 - NEBULA` banner that replaces the wave banner on
+  a jump
 - Dropped salvage as a slowly rotating hex (a magazine) or diamond (gear) with
   its letter inside, blinking out over their last four seconds; a shield is a
   sparse breathing ring round your hull
@@ -280,10 +356,11 @@ draw, leaving the 60 fps loop roughly 4% busy.
 python3 spacewar.py --selftest
 ```
 
-Runs 1,500 frames of simulation and rendering headlessly — every game state,
-both flight models, gear and a bomb, two mid-run resizes — and reports draw
-cost per frame. It writes its save file to a temp path, so your high score is
-left alone.
+Runs 2,600 frames of simulation and rendering headlessly — every game state,
+both flight models, gear and a bomb, two mid-run resizes, a mini-boss and a
+boss wave, and then a jump into each of the four sectors in turn — and reports
+draw cost per frame and the sectors it visited. It writes its save file to a
+temp path, so your high score is left alone.
 
 ```sh
 python3 -m unittest test_spacewar
@@ -292,7 +369,13 @@ python3 -m unittest test_spacewar
 Unit tests for the parts that are easy to get subtly wrong: the difficulty
 dial and wave rosters, bullet range, shot and hit accounting (a fan is three
 shots, a lance threading three hulls is one hit), the chain multiplier and its
-lapse, shield, bomb and life pickups, rocks stopping hostile rounds, each
+lapse, shield, bomb and life pickups, rocks stopping hostile rounds, hot
+fragments (kicked along the shot, hurting a hull, cooling off, and never from a
+ramming), the tender (its wave, its flight away from you, the debt it leaves
+and the salvage it always carries), the aim mark, the between-waves breath and
+its card, the sector order and each sector's rule (fog range, rock inflow,
+mines tripped by shots and hulls but not by hostile rounds, mines chaining, the
+star's pull and what falls into it, the fleet steering clear of it), each
 class's habit, both modes of `Keys`, and every escape sequence `Reader` has
 to decode — legacy arrows, kitty key events, and the terminal's own replies.
 

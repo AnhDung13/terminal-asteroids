@@ -113,7 +113,10 @@ def init_colors():
         PAL["foe2"] = _mk(215, True)     # gunship
         PAL["foe3"] = _mk(207, True)     # marauder - mini boss
         PAL["foe4"] = _mk(203, True)     # dreadnought - boss
+        PAL["foe5"] = _mk(153)           # tender - unarmed, and not bold
         PAL["foeshot"] = _mk(120)
+        PAL["hot"] = _mk(214, True)      # a rock fragment you have launched
+        PAL["mine"] = _mk(196, True)
         PAL["ui"] = _mk(45)
         PAL["ui_hi"] = _mk(87, True)
         PAL["accent"] = _mk(213, True)
@@ -128,6 +131,8 @@ def init_colors():
                           _mk(69), _mk(105)]
         RAMPS["shock"] = [_mk(231, True), _mk(159), _mk(45), _mk(69),
                           _mk(61), _mk(238)]
+        RAMPS["neb"] = [_mk(183, True), _mk(177), _mk(140), _mk(97),
+                        _mk(60)]
     else:
         W, Y, R, C, M, G = (curses.COLOR_WHITE, curses.COLOR_YELLOW,
                             curses.COLOR_RED, curses.COLOR_CYAN,
@@ -143,7 +148,10 @@ def init_colors():
         PAL["foe2"] = _mk(Y, True)
         PAL["foe3"] = _mk(M, True)
         PAL["foe4"] = _mk(R, True)
+        PAL["foe5"] = _mk(W)
         PAL["foeshot"] = _mk(G)
+        PAL["hot"] = _mk(Y, True)
+        PAL["mine"] = _mk(R, True)
         PAL["ui"] = _mk(C)
         PAL["ui_hi"] = _mk(C, True)
         PAL["accent"] = _mk(M, True)
@@ -156,6 +164,7 @@ def init_colors():
         RAMPS["title"] = [_mk(C, True), _mk(C), _mk(M, True), _mk(M)]
         RAMPS["shock"] = [_mk(W, True), _mk(C, True), _mk(C),
                           _mk(C) | curses.A_DIM]
+        RAMPS["neb"] = [_mk(M, True), _mk(M), _mk(M) | curses.A_DIM]
 
 
 # ==========================================================================
@@ -493,15 +502,24 @@ class Ship:
 class Asteroid:
     # size -> (radius px, base speed px/s, points)
     SPECS = {3: (15.0, 17.0, 20), 2: (9.5, 27.0, 50), 1: (5.5, 39.0, 100)}
+    # A fragment knocked loose by one of your shots flies HOT for a moment:
+    # fast, along the shot, and it hurts whatever hull it meets. Then it
+    # cools back into weather. That is what makes a boulder between you and
+    # a gunship worth shooting rather than flying round.
+    HOT = 1.5              # seconds a kicked fragment stays dangerous
+    KICK = 135.0           # px/s it is knocked to
+    DMG = {3: 3, 2: 2, 1: 1}   # hull points a hot fragment does, by size
 
     def __init__(self, x, y, size, scale, vx=None, vy=None, spread=0.3):
         self.x, self.y, self.size = x, y, size
         self.r, base, self.points = self.SPECS[size]
+        self.cruise = base * scale       # the speed it settles back to
         if vx is None:
             sp = base * scale * random.uniform(1.0 - spread * 0.5, 1.0 + spread)
             a = random.uniform(0, TAU)
             vx, vy = sp * math.cos(a), sp * math.sin(a)
         self.vx, self.vy = vx, vy
+        self.hot = 0.0
         self.ang = random.uniform(0, TAU)
         self.spin = random.uniform(-1.5, 1.5)
         self.flash = 0.0
@@ -517,13 +535,31 @@ class Asteroid:
                 self.craters.append((ca, cd, self.r * random.uniform(.12, .22)))
 
     def update(self, dt, world):
+        if self.hot > 0:
+            self.hot = max(0.0, self.hot - dt)
+        elif self.vx * self.vx + self.vy * self.vy > (self.cruise * 1.3) ** 2:
+            # Cooled off: shed the speed the shot gave it, back to a drift.
+            k = 1.0 - min(1.0, 1.6 * dt)
+            self.vx *= k
+            self.vy *= k
         self.x = (self.x + self.vx * dt) % world[0]
         self.y = (self.y + self.vy * dt) % world[1]
         self.ang = (self.ang + self.spin * dt) % TAU
         self.flash = max(0.0, self.flash - dt)
 
-    def draw(self, f):
-        att = A("flash") if self.flash > 0 else A("ast%d" % self.size)
+    def kick(self, vx, vy):
+        """Knock it flying along a shot. A fragment becomes a projectile."""
+        a = math.atan2(vy, vx) + random.uniform(-0.42, 0.42)
+        sp = self.KICK * random.uniform(0.85, 1.15)
+        self.vx, self.vy = sp * math.cos(a), sp * math.sin(a)
+        self.spin = random.uniform(-4.0, 4.0)
+        self.hot = self.HOT
+        self.flash = 0.08
+
+    def draw(self, f, att=None):
+        if att is None:
+            att = (A("flash") if self.flash > 0 else
+                   A("hot") if self.hot > 0 else A("ast%d" % self.size))
         pts = [(self.x + d * math.cos(self.ang + a),
                 self.y + d * math.sin(self.ang + a))
                for a, d in self.shape]
@@ -532,6 +568,11 @@ class Asteroid:
             a = self.ang + ca
             f.arc(self.x + cd * math.cos(a), self.y + cd * math.sin(a),
                   cr, att, 3, step=1.4)
+        if self.hot > 0:       # a streak behind a hot fragment
+            step = 0.03
+            for i in (1, 2, 3):
+                f.dot(self.x - self.vx * step * i, self.y - self.vy * step * i,
+                      ramp("fire", 0.25 + 0.2 * i), 2)
 
 
 class Bullet:
@@ -750,10 +791,10 @@ class Star:
         self.y %= world[1]
         self.ph += self.rate * dt
 
-    def draw(self, f):
+    def draw(self, f, name="star"):
         tw = 0.5 + 0.5 * math.sin(self.ph)
         f.dot(self.x, self.y,
-              ramp("star", 0.25 + 0.7 * self.depth - 0.22 * tw), 0)
+              ramp(name, 0.25 + 0.7 * self.depth - 0.22 * tw), 0)
 
 
 # --------------------------------------------------------------------------
@@ -818,6 +859,19 @@ DREADNOUGHT = [
 DREADNOUGHT_ENG = [(-1.26, -0.16), (-1.26, 0.16), (-1.08, -0.90),
                    (-1.08, 0.90)]
 
+# Tender: the fleet's supply hauler - a long plain hull with a cargo pod
+# slung either side, a cab bulkhead, and no guns at all. It runs from you,
+# and it leaves if you let it.
+_TD_P = [(0.36, -0.34), (0.36, -0.80), (-0.56, -0.80), (-0.56, -0.34)]
+TENDER = [
+    [(0.98, 0.0), (0.72, -0.28), (-0.78, -0.34), (-0.98, -0.14),
+     (-0.98, 0.14), (-0.78, 0.34), (0.72, 0.28), (0.98, 0.0)],
+    _TD_P, flip(_TD_P),
+    [(-0.10, -0.80), (-0.10, -0.34)], [(-0.10, 0.34), (-0.10, 0.80)],
+    [(0.72, -0.28), (0.72, 0.28)],
+]
+TENDER_ENG = [(-0.98, -0.08), (-0.98, 0.08)]
+
 
 class Raider:
     """A hostile ship: four classes, four silhouettes, four habits.
@@ -829,6 +883,16 @@ class Raider:
     marauder breaks orbit every few seconds to run straight at you and then
     peels away. A dreadnought, once it is down to half its hull, throws a full
     ring of fire every few seconds on top of its volleys.
+
+    The fifth class does none of that. A tender carries the fleet's stores:
+    it has no gun, it runs from you, and it spools a jump drive as it goes.
+    Catch it and it always gives up salvage; let it jump and the next wave
+    comes with an extra gunship. It is on the field to make you choose.
+
+    Any gunner that leads its target (gunship, dreadnought) shows where the
+    volley will land for a moment before it fires - a faint mark at the aim
+    point - so the rule "change course after it shoots" can be learned by
+    watching rather than by dying.
     """
 
     # lead: how much of your motion the gunner allows for - 0 fires at where
@@ -848,8 +912,13 @@ class Raider:
                       bsp=74.0, value=12000, shape=DREADNOUGHT,
                       eng=DREADNOUGHT_ENG, keep=134.0, col="foe4",
                       turn=1.7, lead=0.6),
+        "tender": dict(r=11.0, hp=3, speed=46.0, cd=9.9, shots=0, jitter=0.0,
+                       bsp=1.0, value=600, shape=TENDER, eng=TENDER_ENG,
+                       keep=0.0, col="foe5", turn=2.6, lead=0.0),
     }
     BOSSES = ("marauder", "dread")
+    ESCAPE = 12.0          # tender: seconds from arrival to its jump, wave 1
+    AIM_WARN = 0.3         # a leading gunner marks its aim point this long
 
     def __init__(self, kind, x, y, diff, world=None):
         s = self.SPECS[kind]
@@ -887,6 +956,11 @@ class Raider:
         self.phase, self.phase_t = "orbit", random.uniform(2.5, 4.5)
         self.ring_cd = 1.5         # dread: time to the next ring of fire
         self.raged = False         # dread: has the rage been announced
+        self.mark = None           # where the next volley is aimed, if shown
+        self.escape = None         # tender: seconds until it jumps out
+        if kind == "tender":
+            self.phase = "flee"
+            self.escape = self.escape0 = self.ESCAPE * (1.0 - 0.25 * diff)
 
     @staticmethod
     def toward(x1, y1, x2, y2, world):
@@ -916,10 +990,11 @@ class Raider:
     def enraged(self):
         return self.kind == "dread" and self.hp * 2 <= self.hp0
 
-    def update(self, dt, world, ship, bullets):
+    def update(self, dt, world, ship, bullets, sun=None):
         self.t += dt
         self.flash = max(0.0, self.flash - dt)
         self.arrive = max(0.0, self.arrive - dt)
+        self.mark = None
         speed = self.speed
         if ship is not None:
             dx, dy = self.toward(self.x, self.y, ship.x, ship.y, world)
@@ -927,7 +1002,15 @@ class Raider:
             ux, uy = dx / d, dy / d
             if self.kind == "marauder":
                 self._cycle(dt)
-            if self.phase == "charge":
+            if self.phase == "flee":
+                # Straight away from you, weaving, and the drive spooling.
+                wob = 0.55 * math.sin(self.t * 1.3)
+                wx, wy = -ux - uy * wob, -uy + ux * wob
+                n = math.hypot(wx, wy) or 1.0
+                wx, wy = wx / n, wy / n
+                if self.arrive <= 0:
+                    self.escape -= dt
+            elif self.phase == "charge":
                 wx, wy, speed = ux, uy, speed * self.CHARGE_SPEED
             elif self.phase == "retreat":
                 wx, wy, speed = -ux, -uy, speed * self.RETREAT_SPEED
@@ -940,10 +1023,26 @@ class Raider:
                 wx, wy = ux * radial - uy * tang, uy * radial + ux * tang
                 n = math.hypot(wx, wy) or 1.0
                 wx, wy = wx / n, wy / n
-            want = math.atan2(dy, dx)
+            # A gunner faces its target; a hauler faces the way it is going.
+            want = math.atan2(wy, wx) if self.phase == "flee" else \
+                math.atan2(dy, dx)
         else:
             wx, wy = math.cos(self.ang), math.sin(self.ang)
             want = self.ang
+        if sun is not None:
+            # Nobody flies into the star on purpose: shove the heading away
+            # from it, harder the closer the hull gets.
+            sx, sy = self.toward(self.x, self.y, sun.x, sun.y, world)
+            ds = math.hypot(sx, sy) or 1.0
+            edge = sun.r * 3.2 + self.r
+            if ds < edge:
+                push = 3.0 * (edge - ds) / edge
+                wx -= sx / ds * push
+                wy -= sy / ds * push
+                n = math.hypot(wx, wy) or 1.0
+                wx, wy = wx / n, wy / n
+                if self.phase == "flee":
+                    want = math.atan2(wy, wx)
         k = min(1.0, 2.4 * dt)
         self.vx += (wx * speed - self.vx) * k
         self.vy += (wy * speed - self.vy) * k
@@ -953,8 +1052,13 @@ class Raider:
         self.ang = (self.ang + da * min(1.0, self.turn * dt)) % TAU
 
         self.cd -= dt
-        if ship is None or self.arrive > 0:
+        if ship is None or self.arrive > 0 or not self.shots:
             return True
+        if self.lead > 0 and self.cd <= self.AIM_WARN:
+            # The tell: where the rounds are going, shown before they go.
+            t = d / self.bsp * self.lead
+            self.mark = ((ship.x + ship.vx * t) % world[0],
+                         (ship.y + ship.vy * t) % world[1])
         if self.cd <= 0:
             self.cd = self.cd0 * random.uniform(0.85, 1.25)
             self.volley(bullets, world, self.aim(dx, dy, d, ship))
@@ -1003,23 +1107,151 @@ class Raider:
         return self.hp <= 0
 
     def draw(self, f):
+        if self.mark is not None:
+            # A faint cross where the volley will land. Dim, under
+            # everything else: a hint, not a target reticle.
+            mx, my = self.mark
+            att = A("dim")
+            for o in (2, 3):
+                f.dot(mx - o, my, att, 2)
+                f.dot(mx + o, my, att, 2)
+                f.dot(mx, my - o, att, 2)
+                f.dot(mx, my + o, att, 2)
         if self.arrive > 0 and int(self.arrive * 14) % 2 == 0:
             return
         att = A("flash") if self.flash > 0 else A(self.col)
         draw_hull(f, self.x, self.y, self.ang, self.r, self.shape, att, 4)
+        spool = 0.0
+        if self.escape is not None:
+            # The jump drive spooling up: a ring that fills in as the charge
+            # builds, and blinks over the last seconds. Read it, and decide.
+            spool = 1.0 - max(0.0, self.escape) / self.escape0
+            if self.escape > 2.5 or int(self.escape * 8) % 2:
+                f.arc(self.x, self.y, self.r * 1.45,
+                      ramp("shock", 0.85 - 0.75 * spool), 3,
+                      step=3.6 - 2.4 * spool)
         # Engine bloom: a short flare trailing each nozzle, flickering.
         ca, sa = math.cos(self.ang) * self.r, math.sin(self.ang) * self.r
         bx, by = -math.cos(self.ang), -math.sin(self.ang)
         for px, py in self.eng:
             ex = self.x + px * ca - py * sa
             ey = self.y + px * sa + py * ca
-            ln = self.r * random.uniform(0.12, 0.30)
+            ln = self.r * random.uniform(0.12, 0.30) * (1.0 + 1.5 * spool)
             f.line(ex, ey, ex + bx * ln, ey + by * ln,
                    ramp("fire", random.uniform(0.15, 0.55)), 4)
         if self.boss:      # a slow sweeping sensor blip along the spine
             ph = 0.5 + 0.5 * math.sin(self.t * 2.2)
             f.dot(self.x + (0.55 * ph + 0.1) * ca,
                   self.y + (0.55 * ph + 0.1) * sa, A("flash"), 5)
+
+
+# ==========================================================================
+# Sectors
+# ==========================================================================
+# Every SECTOR_WAVES waves - after each dreadnought - the fleet jumps and you
+# follow, into a region of space with one rule of its own. The dial that
+# ramps the fleet is flat by wave 10; from there the sector is what changes.
+# The four rules come in a different order every run.
+SECTOR_WAVES = 10
+SECTORS = {
+    "open": dict(name="OPEN SPACE", note="the fleet, the rocks, and you"),
+    "nebula": dict(name="NEBULA", note="short sensor range - blips beyond it"),
+    "debris": dict(name="DEBRIS FIELD",
+                   note="rocks everywhere, more keep coming"),
+    "mines": dict(name="MINEFIELD", note="proximity mines - shoot to set off"),
+    "star": dict(name="GRAVITY WELL",
+                 note="a star pulls everything in - keep off"),
+}
+SECTOR_CYCLE = ("nebula", "debris", "mines", "star")
+
+
+class Mine:
+    """A proximity charge adrift in a minefield sector.
+
+    It goes off when any hull comes close - yours or theirs - or when one of
+    your shots finds it, and everything inside the blast pays. The fleet's
+    rounds pass it by: a minefield that cleared itself would be scenery.
+    Shooting one out from under a gunship is the whole idea.
+    """
+
+    R = 3.5            # drawn radius; a shot this close sets it off
+    TRIG = 11.0        # a hull this close sets it off
+    BLAST = 34.0       # everything this close pays
+    DMG = 3
+
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+        a = random.uniform(0, TAU)
+        sp = random.uniform(3.0, 9.0)
+        self.vx, self.vy = sp * math.cos(a), sp * math.sin(a)
+        self.t = random.uniform(0, TAU)
+
+    def update(self, dt, world):
+        self.x = (self.x + self.vx * dt) % world[0]
+        self.y = (self.y + self.vy * dt) % world[1]
+        self.t += dt
+
+    def draw(self, f):
+        att = A("mine")
+        f.arc(self.x, self.y, self.R, att, 3, step=1.3)
+        for i in range(4):                     # four contact horns
+            a = i * TAU / 4 + TAU / 8
+            f.line(self.x + self.R * math.cos(a), self.y + self.R * math.sin(a),
+                   self.x + (self.R + 2.2) * math.cos(a),
+                   self.y + (self.R + 2.2) * math.sin(a), att, 3)
+        if int(self.t * 2.5) % 2:              # the arming light
+            f.dot(self.x, self.y, A("flash"), 4)
+
+
+class Sun:
+    """The star at the heart of a gravity-well sector.
+
+    It pulls on everything that moves - rocks, rounds, salvage, the fleet
+    and you - with an inverse-square field capped so that a close pass is
+    survivable and a straight line into it is not. Touch it and you are
+    gone. Shots bend round it, so a curved shot past the star is on the
+    table; so is the fleet's habit of orbiting you straight through it.
+    """
+
+    G = 320000.0        # px^3/s^2: 32 px/s^2 of pull at 100 px
+    MAX_PULL = 240.0    # px/s^2, close in
+
+    def __init__(self, world):
+        self.t = random.uniform(0, TAU)
+        self.fit(world)
+
+    def fit(self, world):
+        self.x, self.y = world[0] * 0.5, world[1] * 0.5
+        self.r = max(5.0, min(10.0, world[1] * 0.11))
+
+    def pull(self, x, y, world):
+        """Acceleration toward the star, for something at (x, y)."""
+        dx, dy = Raider.toward(x, y, self.x, self.y, world)
+        d2 = dx * dx + dy * dy
+        if d2 < 1.0:
+            return 0.0, 0.0
+        d = math.sqrt(d2)
+        a = min(self.MAX_PULL, self.G / d2)
+        return a * dx / d, a * dy / d
+
+    def inside(self, x, y, world):
+        dx, dy = Raider.toward(x, y, self.x, self.y, world)
+        return dx * dx + dy * dy < self.r * self.r
+
+    def update(self, dt):
+        self.t += dt
+
+    def draw(self, f):
+        # A hard bright core, and a corona of loose arcs turning round it.
+        r = self.r
+        for k in (1.0, 0.62, 0.3):
+            f.arc(self.x, self.y, r * k, A("flash"), 3, step=0.9)
+        for i in range(5):
+            a0 = self.t * (0.6 + 0.3 * i) + i * 1.3
+            a1 = a0 + 1.4 + 0.5 * math.sin(self.t * 1.7 + i * 2.0)
+            rr = r * (1.25 + 0.18 * i) + 0.6 * math.sin(self.t * 3.0 + i)
+            f.arc(self.x, self.y, rr, ramp("fire", 0.25 + 0.15 * i), 2,
+                  step=2.2 + 0.8 * i, a0=a0, a1=a1)
 
 
 # ==========================================================================
@@ -1068,12 +1300,14 @@ class Game:
         for o in self.movers():
             o.x = (o.x * fx) % self.world[0]
             o.y = (o.y * fy) % self.world[1]
+        if self.sun is not None:
+            self.sun.fit(self.world)
         self.stars = [Star(self.world) for _ in range(self.star_count())]
 
     def movers(self):
         objs = (self.asteroids + self.bullets + self.particles +
                 self.shocks + self.debris + self.pops + self.foes +
-                self.pickups)
+                self.pickups + self.mines)
         if self.ship:
             objs.append(self.ship)
         return objs
@@ -1095,12 +1329,55 @@ class Game:
         return a + (b - a) * t
 
     def rock_scale(self):
-        return self.lerp(0.60, 1.80, self.diff())
+        k = 1.25 if self.cur == "debris" else 1.0
+        return self.lerp(0.60, 1.80, self.diff()) * k
 
     def rock_count(self):
         # Rocks are scenery now - something to dodge while you fight, not the
-        # objective. A handful, and never a field to grind through.
-        return min(2 + self.level // 3, 6)
+        # objective. A handful, and never a field to grind through - except
+        # in a debris field, where the field is the point.
+        n = min(2 + self.level // 3, 6)
+        if self.cur == "debris":
+            n = min(n * 2 + 2, 14)
+        return n
+
+    ROCK_INFLOW = 4.0       # debris field: seconds between fresh boulders
+
+    def mine_count(self):
+        return min(4 + self.level // 10, 9) if self.cur == "mines" else 0
+
+    # -- sectors ----------------------------------------------------------
+    def sector_index(self, level=None):
+        lv = self.level if level is None else level
+        return max(0, (lv - 1) // SECTOR_WAVES)
+
+    def sector(self, level=None):
+        i = self.sector_index(level)
+        if i == 0:
+            return "open"
+        return self.sector_order[(i - 1) % len(self.sector_order)]
+
+    def jump_sector(self, name):
+        """The fleet has jumped; so have you. New sky, new rule. Salvage
+        comes along - it is cargo now - but the rocks and the mines stay
+        where they were."""
+        self.cur = name
+        self.asteroids = []
+        self.mines = []
+        self.bullets = [b for b in self.bullets if not b.hostile]
+        self.sun = Sun(self.world) if name == "star" else None
+        w, h = self.world
+        self.shocks.append(Shock(w / 2, h / 2, 2, max(w, h) * 0.7, 0.9))
+        beep()
+
+    def vis(self):
+        """Sensor range in a nebula: anything further off is a blip."""
+        return max(48.0, 0.36 * math.hypot(*self.world))
+
+    def fogged(self, x, y):
+        if self.cur != "nebula" or self.ship is None:
+            return False
+        return self.wrap_dist(self.ship.x, self.ship.y, x, y) > self.vis()
 
     MAX_FOES = 7            # escorts on screen at once; a boss is extra
 
@@ -1113,18 +1390,26 @@ class Game:
     def is_mini_wave(self):
         return self.level % 5 == 0 and not self.is_boss_wave()
 
+    TENDER_EVERY = 3        # a tender rides with every third ordinary wave
+
     def roster(self):
-        """The ships that will arrive this wave, in the order they arrive."""
+        """The ships that will arrive this wave, in the order they arrive.
+
+        Every tender that got away is paid for here: one more gunship in the
+        escort, on whatever wave comes next.
+        """
         lv = self.level
         if self.is_boss_wave():
-            out = ["dread"] + ["gunship"] * 3 + ["scout"] * 4
+            out = ["dread"] + ["gunship"] * (3 + self.debt) + ["scout"] * 4
         elif self.is_mini_wave():
-            out = ["marauder"] + ["gunship"] * 2 + ["scout"] * 4
+            out = ["marauder"] + ["gunship"] * (2 + self.debt) + ["scout"] * 4
         else:
             scouts = min(3 + lv // 2, 10)
-            guns = min(lv // 3, 5)
+            guns = min(lv // 3, 5) + self.debt
             out = ["scout"] * scouts + ["gunship"] * guns
             random.shuffle(out)
+            if lv >= self.TENDER_EVERY and lv % self.TENDER_EVERY == 0:
+                out.insert(len(out) // 2, "tender")     # mid-wave, never first
             return out
         rest = out[1:]
         random.shuffle(rest)
@@ -1180,9 +1465,22 @@ class Game:
         self.pops = []
         self.foes = []
         self.pickups = []
+        self.mines = []
         self.queue = []            # classes still to arrive this wave
         self.spawn_cd = 0.0
+        self.rock_cd = 0.0
         self.ship = None
+        self.break_t = None        # the breath between waves, while it lasts
+        self.card = None           # the card shown during it
+        self.wave_t = 0.0          # the wave's own ledger, for that card
+        self.wave_shots0 = self.wave_hits0 = 0
+        self.wave_kills = self.wave_lost = 0
+        self.wave_peak = 1
+        self.cur = "open"          # the sector you are in
+        self.sun = None
+        self.sector_order = list(SECTOR_CYCLE)
+        random.shuffle(self.sector_order)
+        self.clock = 0.0
         self.fire_cd = 0.0
         self.weapon = None         # None = the ship's own gun
         self.ammo = 0
@@ -1193,6 +1491,7 @@ class Game:
             self.score = 0
             self.lives = 3
             self.level = 0
+            self.debt = 0          # tenders that jumped out unpaid-for
             self.next_extra = 20000
             self.shots = self.hits = 0
             self.best_combo = 0
@@ -1204,28 +1503,67 @@ class Game:
         self.spawn_ship()
         self.flash("%s FLIGHT" % self.mode.upper(), 1.6)
 
-    def spawn_ship(self):
+    def spawn_point(self):
         w, h = self.world
-        self.ship = Ship(w / 2, h / 2)
+        if self.sun is None:
+            return w / 2, h / 2
+        # Not in the star: above it, outside the pull that matters.
+        return w / 2, (h / 2 - max(h * 0.30, self.sun.r * 4.0)) % h
+
+    def spawn_ship(self):
+        x, y = self.spawn_point()
+        self.ship = Ship(x, y)
         if self.level <= 2:
             self.ship.invuln = 3.2
-        self.shocks.append(Shock(w / 2, h / 2, 26, 5, 0.5))
+        self.shocks.append(Shock(x, y, 26, 5, 0.5))
+
+    def clear_spot(self, margin):
+        """A random point at least `margin` from the centre and from you."""
+        w, h = self.world
+        for _ in range(40):
+            x, y = random.uniform(0, w), random.uniform(0, h)
+            if self.wrap_dist(x, y, w / 2, h / 2) < margin:
+                continue
+            if self.ship and self.wrap_dist(x, y, self.ship.x,
+                                            self.ship.y) < margin:
+                continue
+            break
+        return x, y
+
+    def edge_rock(self):
+        """A fresh boulder drifting in off an edge, in a debris field."""
+        w, h = self.world
+        if random.random() < 0.5:
+            x, y = random.uniform(0, w), random.choice((1.0, h - 2.0))
+        else:
+            x, y = random.choice((1.0, w - 2.0)), random.uniform(0, h)
+        return Asteroid(x, y, 3, self.rock_scale(), spread=0.4)
 
     def spawn_wave(self):
         self.level += 1
-        w, h = self.world
+        jumped = self.sector() != self.cur
+        if jumped:
+            self.jump_sector(self.sector())
         d = self.diff()
         scale, spread = self.rock_scale(), 0.15 + 0.35 * d
         for _ in range(max(0, self.rock_count() - len(self.asteroids))):
-            while True:
-                x, y = random.uniform(0, w), random.uniform(0, h)
-                if self.wrap_dist(x, y, w / 2, h / 2) > 60:
-                    break
+            x, y = self.clear_spot(60)
             self.asteroids.append(Asteroid(x, y, 3, scale, spread=spread))
+        for _ in range(max(0, self.mine_count() - len(self.mines))):
+            self.mines.append(Mine(*self.clear_spot(50)))
         self.queue = self.roster()
+        self.debt = 0
         self.spawn_cd = 1.4
+        self.wave_t = 0.0
+        self.wave_shots0, self.wave_hits0 = self.shots, self.hits
+        self.wave_kills = self.wave_lost = 0
+        self.wave_peak = 1
         if self.state != "title":
-            if self.is_boss_wave():
+            if jumped:
+                self.flash("SECTOR %d  -  %s" % (self.sector_index() + 1,
+                                                 SECTORS[self.cur]["name"]),
+                           2.6)
+            elif self.is_boss_wave():
                 self.flash("WAVE %d  -  DREADNOUGHT" % self.level, 2.4)
             elif self.is_mini_wave():
                 self.flash("WAVE %d  -  MARAUDER" % self.level, 2.2)
@@ -1366,8 +1704,17 @@ class Game:
             return
         self.shocks.append(Shock(s.x, s.y, 22, 2, 0.35))
         self.burst(s.x, s.y, 14, 60, 0.4)
-        s.x = random.uniform(0, self.world[0])
-        s.y = random.uniform(0, self.world[1])
+        for _ in range(24):
+            x = random.uniform(0, self.world[0])
+            y = random.uniform(0, self.world[1])
+            if self.sun is not None and self.wrap_dist(
+                    x, y, self.sun.x, self.sun.y) < self.sun.r * 4.0:
+                continue
+            if any(self.wrap_dist(x, y, m.x, m.y) < Mine.TRIG + 12.0
+                   for m in self.mines):
+                continue
+            break
+        s.x, s.y = x, y
         s.vx = s.vy = 0.0
         s.invuln = max(s.invuln, 0.8)
         s.warp_cd = 3.0
@@ -1447,6 +1794,7 @@ class Game:
             dt -= step
 
     def update(self, dt, keys):
+        self.clock += dt
         self.msg_t = max(0.0, self.msg_t - dt)
         self.shake = max(0.0, self.shake - dt)
         self.sweep = max(0.0, self.sweep - dt)
@@ -1479,11 +1827,16 @@ class Game:
             self.timer -= dt
             for a in self.asteroids:
                 a.update(dt, self.world)
+            for m in self.mines:
+                m.update(dt, self.world)
+            if self.sun is not None:
+                self.sun.update(dt)
             for foe in self.foes:
-                foe.update(dt, self.world, None, self.bullets)
+                foe.update(dt, self.world, None, self.bullets, self.sun)
             for b in self.bullets:
                 b.update(dt, self.world)
             self.bullets = [b for b in self.bullets if b.life > 0]
+            self.gravity(dt)
             if self.timer <= 0:
                 if self.lives <= 0:
                     self.end_game()
@@ -1493,6 +1846,8 @@ class Game:
             return
 
         # ---- playing ----
+        if self.break_t is None:
+            self.wave_t += dt
         if self.combo:
             self.combo_t -= dt
             if self.combo_t <= 0:
@@ -1518,11 +1873,21 @@ class Game:
                     random.uniform(0.15, 0.35), 0.93))
         for a in self.asteroids:
             a.update(dt, self.world)
+        for m in self.mines:
+            m.update(dt, self.world)
+        if self.sun is not None:
+            self.sun.update(dt)
         for b in self.bullets:
             b.update(dt, self.world)
             if b.kind == "homing" and not b.hostile:
                 self.home(b, dt)
         self.bullets = [b for b in self.bullets if b.life > 0]
+        self.gravity(dt)
+        if self.cur == "debris":
+            self.rock_cd -= dt
+            if self.rock_cd <= 0 and len(self.asteroids) < self.rock_count():
+                self.rock_cd = self.ROCK_INFLOW
+                self.asteroids.append(self.edge_rock())
 
         self.spawn_cd -= dt
         if (self.queue and self.spawn_cd <= 0 and
@@ -1530,12 +1895,110 @@ class Game:
             self.spawn_foe(self.queue.pop(0))
             self.spawn_cd = self.spawn_gap()
         for foe in self.foes:
-            foe.update(dt, self.world, self.ship, self.bullets)
+            foe.update(dt, self.world, self.ship, self.bullets, self.sun)
+        for foe in list(self.foes):
+            if foe.escape is not None and foe.escape <= 0:
+                self.escape_foe(foe)
 
         self.collisions()
-        # The wave is the fleet. Leftover rocks drift on into the next one.
+        # The wave is the fleet. When it is gone there is a breath - and the
+        # card on the wave just fought - and then the next one. Leftover
+        # rocks drift on into it.
         if not self.foes and not self.queue:
-            self.spawn_wave()
+            if self.break_t is None:
+                self.begin_break()
+            else:
+                self.break_t -= dt
+                if self.break_t <= 0:
+                    self.break_t = None
+                    self.spawn_wave()
+
+    BREAK = 2.2            # seconds of quiet between waves
+    BREAK_JUMP = 4.0       # longer after a boss: the jump drive charging
+
+    def begin_break(self):
+        """The fleet is gone. A breath, and a card on the wave just fought."""
+        jump = self.is_boss_wave()
+        self.break_t = self.BREAK_JUMP if jump else self.BREAK
+        shots = self.shots - self.wave_shots0
+        hits = self.hits - self.wave_hits0
+        acc = 100.0 * hits / shots if shots else 0.0
+        lines = ["WAVE %d CLEAR" % self.level,
+                 "%.1fs   %d ships   %.0f%% hits   chain x%d"
+                 % (self.wave_t, self.wave_kills, acc, self.wave_peak)]
+        if self.wave_lost:
+            lines.append("· %d ship%s lost" % (self.wave_lost,
+                                               "" if self.wave_lost == 1
+                                               else "s"))
+        if jump:
+            nxt = self.sector(self.level + 1)
+            lines += ["", "JUMP DRIVE CHARGING",
+                      "SECTOR %d  %s" % (self.sector_index(self.level + 1) + 1,
+                                         SECTORS[nxt]["name"]),
+                      "· " + SECTORS[nxt]["note"]]
+        self.card = lines
+
+    ARCADE_DRIFT = 0.55    # arcade: the star's pull, as a drift on the hull
+
+    def gravity(self, dt):
+        """The star's pull on everything that moves, and its price."""
+        sun = self.sun
+        if sun is None:
+            return
+        w = self.world
+        for a in list(self.asteroids):
+            ax, ay = sun.pull(a.x, a.y, w)
+            a.vx += ax * dt
+            a.vy += ay * dt
+            if sun.inside(a.x, a.y, w):
+                self.asteroids.remove(a)
+                self.flare(a.x, a.y, a.r)
+        for b in list(self.bullets):
+            ax, ay = sun.pull(b.x, b.y, w)
+            b.vx += ax * dt
+            b.vy += ay * dt
+            if sun.inside(b.x, b.y, w):
+                self.bullets.remove(b)
+        for pk in list(self.pickups):
+            ax, ay = sun.pull(pk.x, pk.y, w)
+            pk.vx += ax * dt * 0.5
+            pk.vy += ay * dt * 0.5
+            if sun.inside(pk.x, pk.y, w):
+                self.pickups.remove(pk)
+                self.flare(pk.x, pk.y, Pickup.R)
+        for foe in list(self.foes):
+            if foe.arrive > 0:
+                continue
+            ax, ay = sun.pull(foe.x, foe.y, w)
+            foe.vx += ax * dt * 0.6            # engines fight some of it
+            foe.vy += ay * dt * 0.6
+            if sun.inside(foe.x, foe.y, w):
+                self.kill_foe(foe, drops=False)  # you may well have put it there
+        s = self.ship
+        if s is None:
+            return
+        ax, ay = sun.pull(s.x, s.y, w)
+        if self.mode == "classic":
+            s.vx += ax * dt
+            s.vy += ay * dt
+        else:
+            # Arcade flies at a commanded velocity, so a push on that
+            # velocity is undone within a few frames. Drag the hull instead:
+            # the star is a current you fly against.
+            s.x = (s.x + ax * self.ARCADE_DRIFT * dt) % w[0]
+            s.y = (s.y + ay * self.ARCADE_DRIFT * dt) % w[1]
+        if s.invuln <= 0 and sun.inside(s.x, s.y, w):
+            if not self.hurt():                # the shield took it: thrown clear
+                dx, dy = Raider.toward(sun.x, sun.y, s.x, s.y, w)
+                d = math.hypot(dx, dy) or 1.0
+                s.x = (sun.x + dx / d * sun.r * 4.0) % w[0]
+                s.y = (sun.y + dy / d * sun.r * 4.0) % w[1]
+                s.vx = s.vy = 0.0
+
+    def flare(self, x, y, r):
+        """Something fell into the star."""
+        self.burst(x, y, int(6 + r), 40 + r * 2, 0.4)
+        self.shocks.append(Shock(x, y, 2, r * 2.0, 0.3))
 
     def update_title(self, dt):
         """Attract mode: a demo ship loops around duelling interceptors."""
@@ -1556,7 +2019,7 @@ class Game:
         for b in list(self.bullets):
             for a in list(self.asteroids):
                 if self.wrap_dist(b.x, b.y, a.x, a.y) < a.r:
-                    self.split(a)
+                    self.split(a, kick=(b.vx, b.vy))
                     if b in self.bullets:
                         self.bullets.remove(b)
                     break
@@ -1617,12 +2080,49 @@ class Game:
             else:
                 for a in list(self.asteroids):
                     if self.wrap_dist(b.x, b.y, a.x, a.y) < a.r:
-                        self.split(a)
+                        self.split(a, kick=(b.vx, b.vy))
                         if b in self.bullets:
                             self.bullets.remove(b)
                         if not b.spent:          # None or empty: first hit
                             self.hits += 1
                         break
+
+        # A hot fragment is your round now: it hurts the first hull it meets.
+        for a in list(self.asteroids):
+            if a.hot <= 0:
+                continue
+            for foe in list(self.foes):
+                if foe.arrive > 0:
+                    continue
+                if self.wrap_dist(a.x, a.y, foe.x, foe.y) < a.r + foe.r * 0.8:
+                    self.smash(a, foe)
+                    break
+
+        # Mines: a shot of yours, or any hull too close, sets one off.
+        for m in list(self.mines):
+            tripped = False
+            for b in list(self.bullets):
+                if b.hostile:
+                    continue
+                if self.wrap_dist(b.x, b.y, m.x, m.y) < Mine.R + 1.5:
+                    self.bullets.remove(b)
+                    if not b.spent:
+                        self.hits += 1
+                    tripped = True
+                    break
+            s = self.ship
+            if (not tripped and s is not None and s.invuln <= 0 and
+                    self.wrap_dist(s.x, s.y, m.x, m.y) <
+                    Mine.TRIG + Ship.RADIUS):
+                tripped = True
+            if not tripped:
+                for foe in self.foes:
+                    if foe.arrive <= 0 and self.wrap_dist(
+                            foe.x, foe.y, m.x, m.y) < Mine.TRIG + foe.r * 0.6:
+                        tripped = True
+                        break
+            if tripped and m in self.mines:
+                self.detonate(m)
 
         s = self.ship
         if s is None:
@@ -1660,6 +2160,32 @@ class Game:
                     self.hurt()
                 return
 
+    def detonate(self, m):
+        """A mine goes off. Everything inside the blast pays - the fleet's
+        hulls and yours alike - and a mine inside it goes off too."""
+        self.mines.remove(m)
+        self.shocks.append(Shock(m.x, m.y, 3, Mine.BLAST * 1.15, 0.5))
+        self.shocks.append(Shock(m.x, m.y, 2, 14, 0.25))
+        self.burst(m.x, m.y, 26, 90, 0.5)
+        self.shake = max(self.shake, 0.22)
+        for foe in list(self.foes):
+            if foe.arrive > 0:
+                continue
+            if self.wrap_dist(foe.x, foe.y, m.x, m.y) < Mine.BLAST + foe.r * 0.5:
+                if foe.hit(Mine.DMG):
+                    self.kill_foe(foe)
+                else:
+                    self.burst(foe.x, foe.y, 6, 44, 0.25)
+                    self.rage_check(foe)
+        s = self.ship
+        if (s is not None and s.invuln <= 0 and
+                self.wrap_dist(s.x, s.y, m.x, m.y) < Mine.BLAST):
+            self.hurt()
+        for other in list(self.mines):
+            if other in self.mines and self.wrap_dist(
+                    other.x, other.y, m.x, m.y) < Mine.BLAST * 0.8:
+                self.detonate(other)
+
     def collect(self, kind):
         """Take a pickup aboard."""
         spec = ITEMS[kind]
@@ -1682,7 +2208,9 @@ class Game:
             self.flash("EXTRA SHIP", 1.4)
             beep()
 
-    def split(self, a, award=True):
+    def split(self, a, award=True, kick=None):
+        """Break a rock in two. `kick` is the shot's velocity, if a shot did
+        it: the fragments then fly off along it, hot."""
         if award:      # rocks ride the multiplier but do not extend the chain
             self.award(a.points, a.x, a.y, A("ast%d" % a.size))
         self.burst(a.x, a.y, 6 + 7 * a.size, 30 + 22 * a.size, 0.5 + 0.1 * a.size)
@@ -1700,21 +2228,50 @@ class Game:
                 child = Asteroid(a.x, a.y, a.size - 1, self.rock_scale(),
                                  sp * math.cos(ang), sp * math.sin(ang))
                 child.flash = 0.08
+                if kick is not None:
+                    child.kick(*kick)
                 self.asteroids.append(child)
 
-    DROP = {"scout": 0.10, "gunship": 0.26}
+    def smash(self, a, foe):
+        """A hot fragment meets a hull: the rock shatters, the hull pays."""
+        self.award(a.points, a.x, a.y, A("hot"))
+        self.burst(a.x, a.y, 8 + 6 * a.size, 40 + 20 * a.size, 0.45)
+        self.shocks.append(Shock(a.x, a.y, a.r * 0.5, a.r * 2.8, 0.3))
+        self.shake = max(self.shake, 0.08 + 0.04 * a.size)
+        self.asteroids.remove(a)
+        if foe.hit(Asteroid.DMG[a.size]):
+            self.kill_foe(foe)
+        else:
+            self.burst(foe.x, foe.y, 6, 44, 0.25)
+            self.rage_check(foe)
 
-    def kill_foe(self, foe, award=True):
+    DROP = {"scout": 0.10, "gunship": 0.26}
+    TENDER_DROPS = 2
+
+    def escape_foe(self, foe):
+        """A tender's jump drive fires: it is gone, and the debt is booked."""
+        self.foes.remove(foe)
+        self.debt += 1
+        self.shocks.append(Shock(foe.x, foe.y, foe.r * 1.5, 2, 0.3))
+        self.shocks.append(Shock(foe.x, foe.y, 3, foe.r * 4.0, 0.5))
+        self.burst(foe.x, foe.y, 16, 60, 0.4)
+        self.flash("TENDER ESCAPED  -  ESCORT REINFORCED", 1.8)
+
+    def kill_foe(self, foe, award=True, drops=True):
         if foe not in self.foes:
             return
         self.foes.remove(foe)
         if award:
             self.chain()
             self.award(foe.value, foe.x, foe.y, A(foe.col))
-            # Wrecks give up their salvage. A capital ship gives up several.
-            drops = (3 if foe.kind == "dread" else 2) if foe.boss else (
-                1 if random.random() < self.DROP.get(foe.kind, 0.0) else 0)
-            for _ in range(drops):
+            self.wave_kills += 1
+            self.wave_peak = max(self.wave_peak, self.mult())
+            # Wrecks give up their salvage. A capital ship gives up several,
+            # and a tender - it is nothing but cargo - always does.
+            n = ((3 if foe.kind == "dread" else 2) if foe.boss else
+                 self.TENDER_DROPS if foe.kind == "tender" else
+                 1 if random.random() < self.DROP.get(foe.kind, 0.0) else 0)
+            for _ in range(n if drops else 0):
                 self.pickups.append(Pickup(foe.x, foe.y, self.loot()))
         n = int(18 + foe.r * 2.4)
         self.burst(foe.x, foe.y, n, 70 + foe.r * 3.0, 0.7 + foe.r * 0.03)
@@ -1752,6 +2309,7 @@ class Game:
         # and a fresh ship with an empty gun is a second death waiting.
         self.combo = 0                        # the chain does not survive it
         self.lives -= 1
+        self.wave_lost += 1
         beep()
         self.state = "dead"
         self.timer = 1.7
@@ -1765,6 +2323,11 @@ class Game:
 
     # -- render -----------------------------------------------------------
     def draw(self, stdscr):
+        self.render()
+        self.screen.blit(stdscr)
+
+    def render(self):
+        """Composite the whole frame into the screen buffer."""
         sc = self.screen
         sc.clear()
         cx, cy = self.cell_x, self.cell_y
@@ -1776,8 +2339,22 @@ class Game:
             cy += int(round(amp * 0.55 * math.sin(self.shake * 39.0 + 1.7)))
         f = Field(sc, cx, cy, *self.world)
 
+        # In a nebula anything past sensor range is a blip: the fleet a
+        # blinking dot in its own colour, its rounds the faintest speck,
+        # rocks a dim outline. Your own shots you can always see.
+        fog = (self.cur == "nebula" and self.ship is not None and
+               self.state != "title")
+        vis = self.vis()
+
+        def far(o):
+            return fog and self.wrap_dist(self.ship.x, self.ship.y,
+                                          o.x, o.y) > vis
+
+        neb = "neb" if self.cur == "nebula" else "star"
         for st in self.stars:
-            st.draw(f)
+            st.draw(f, neb)
+        if self.sun is not None:
+            self.sun.draw(f)
         if self.sweep > 0:
             x = self.world[0] * (1.0 - self.sweep / 0.45)
             for y in range(0, self.world[1], 2):
@@ -1789,13 +2366,29 @@ class Game:
         for d in self.debris:
             d.draw(f)
         for a in self.asteroids:
-            a.draw(f)
+            a.draw(f, A("frame") if far(a) else None)
+        for m in self.mines:
+            m.draw(f)
         for pk in self.pickups:
-            pk.draw(f)
+            if far(pk):
+                f.dot(pk.x, pk.y, A("dim"), 3)
+            else:
+                pk.draw(f)
+        blink = int(self.clock * 3) % 2
         for foe in self.foes:
-            foe.draw(f)
+            if far(foe):
+                if blink:
+                    f.dot(foe.x, foe.y, A(foe.col), 3)
+                    f.dot(foe.x + 1, foe.y, A(foe.col), 3)
+            else:
+                foe.draw(f)
         for b in self.bullets:
-            b.draw(f)
+            if b.hostile and far(b):
+                f.dot(b.x, b.y, A("frame"), 3)
+            else:
+                b.draw(f)
+        if fog:            # the edge of what you can see
+            f.arc(self.ship.x, self.ship.y, vis, A("frame"), 0, step=7.0)
         if self.ship:
             self.ship.draw(f)
         for p in self.pops:
@@ -1811,7 +2404,13 @@ class Game:
         elif self.state == "paused":
             self.panel(sc, ["PAUSED", "", "P  resume       M  flight model",
                             "R  restart      Q  quit"])
-        sc.blit(stdscr)
+        elif (self.state == "play" and self.break_t is not None and
+              self.card and (self.break_t > 0.35 or
+                             int(self.break_t * 14) % 2)):
+            # The wave card sits low, clear of the banner line.
+            y0 = sc.h * 2 // 3 - len(self.card) // 2
+            y0 = max(2, min(y0, sc.h - len(self.card) - 4))
+            self.panel(sc, self.card, y0=y0)
 
     # -- chrome -----------------------------------------------------------
     def draw_frame(self, sc):
@@ -1855,12 +2454,18 @@ class Game:
         boss = next((f for f in self.foes if f.boss), None)
         left_over = len(self.foes) + len(self.queue)
         mid = "WAVE %d" % self.level
+        if w > 72 and self.cur != "open":
+            mid += " · " + SECTORS[self.cur]["name"]
         if w > 56:
             mid += "  " + ("▾" * min(left_over, 12) if left_over else "CLEAR")
         if x + len(mid) + 6 < w - 16:
             sc.text((w - len(mid)) // 2 - 1, 0, " " + mid + " ", A("accent"))
         if boss is not None and w > 64:
             self.boss_bar(sc, boss)
+        elif w > 64:
+            tender = next((f for f in self.foes if f.escape is not None), None)
+            if tender is not None:
+                self.tender_bar(sc, tender)
         right = "HIGH %d" % max(self.high, self.score)
         if len(right) + 6 < w:
             sc.text(w - len(right) - 3, 0, " " + right + " ", A("ui"))
@@ -1928,6 +2533,19 @@ class Game:
         x = max(1, (w - len(s)) // 2)
         sc.text(x, 1, s, A(boss.col) if boss.flash <= 0 else A("flash"))
 
+    def tender_bar(self, sc, tender):
+        """How close the tender is to jumping out - same line as a boss's
+        hull, since a wave never has both."""
+        w = self.sw
+        cells = max(8, min(20, w // 6))
+        full = int(round(cells * (1.0 - max(0.0, tender.escape) /
+                                  tender.escape0)))
+        bar = BAR_FULL * full + BAR_EMPTY * (cells - full)
+        s = " TENDER JUMP %s " % bar
+        x = max(1, (w - len(s)) // 2)
+        late = tender.escape < 2.5 and int(tender.escape * 8) % 2 == 0
+        sc.text(x, 1, s, A("warn") if late else A(tender.col))
+
     def title_bars(self, sc):
         y = self.sh - 1
         tag = " a t t r a c t   m o d e "
@@ -1950,11 +2568,12 @@ class Game:
             else A("ui_hi")
         sc.ctext(y, line, attr)
 
-    def panel(self, sc, lines, title_attr=None):
+    def panel(self, sc, lines, title_attr=None, y0=None):
         wide = min(max(len(s) for s in lines) + 8, sc.w - 4)
         high = len(lines) + 2
         x0 = (sc.w - wide) // 2
-        y0 = (sc.h - high) // 2
+        if y0 is None:
+            y0 = (sc.h - high) // 2
         fr = A("ui")
         sc.text(x0, y0, "╭" + "─" * (wide - 2) + "╮", fr)
         for i, s in enumerate(lines):
@@ -2017,7 +2636,7 @@ class Game:
              A("warn")),
             (7, "wrecks drop magazines and gear:  O shield   * bomb (Z)"
                 "   + ship", A("dim")),
-            (8, "chain kills for up to x5  -  lose a ship and it resets",
+            (8, "chain kills for up to x5   ·   a new sector every 10 waves",
              A("dim")),
         ]
         if self.high:
@@ -2510,7 +3129,7 @@ def loop(stdscr, game, keys, reader):
             time.sleep(slack)
 
 
-def selftest(frames=1500):
+def selftest(frames=2600):
     """Headless run: simulate and render every state without a terminal."""
     global STATE_FILE
     STATE_FILE = os.path.join(os.environ.get("TMPDIR", "/tmp"),
@@ -2521,6 +3140,7 @@ def selftest(frames=1500):
     g.start_game()
     keys = Keys()
     draw_ns = 0.0
+    seen = set()
     for i in range(frames):
         t = i / FPS
         keys.tick(t)
@@ -2546,6 +3166,17 @@ def selftest(frames=1500):
             g.level = 9
             g.foes = []
             g.queue = []
+        if i in (1300, 1600, 1900, 2200):   # then through every sector
+            if g.state != "play":            # whatever state the run is in
+                g.state, g.lives = "play", 3
+                if g.ship is None:
+                    g.spawn_ship()
+            g.level = 10 * (1 + (i - 1300) // 300)
+            g.sector_order = list(SECTOR_CYCLE)
+            g.foes, g.queue = [], []
+            g.begin_break()
+            g.break_t = 0.02
+        seen.add(g.cur)
         if i == 250:
             g.toggle_mode()
         if i == 350 and g.ship:            # gear: a shield, then a bomb
@@ -2557,14 +3188,7 @@ def selftest(frames=1500):
         if i == 800:
             g.resize(160, 46)
         d0 = time.perf_counter()
-        g.screen.clear()
-        f = Field(g.screen, g.cell_x, g.cell_y, *g.world)
-        for st in g.stars:
-            st.draw(f)
-        for o in g.movers():
-            o.draw(f)
-        g.draw_frame(g.screen)
-        g.draw_banner(g.screen)
+        g.render()
         g.draw_title(g.screen)
         g.draw_over(g.screen)
         g.panel(g.screen, ["PAUSED", "", "P resume"])
@@ -2577,6 +3201,7 @@ def selftest(frames=1500):
                                    1000 * draw_ns / frames))
     print("            score %d  wave %d  objects %d  mode %s"
           % (g.score, g.level, len(g.movers()), g.mode))
+    print("            sectors %s" % " ".join(sorted(seen)))
 
 
 def keytest(stdscr):
