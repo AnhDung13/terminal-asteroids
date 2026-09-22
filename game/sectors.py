@@ -4,6 +4,7 @@ import math
 import random
 
 from .colors import A, ramp
+from . import config
 from .config import TAU, wrap_delta
 
 
@@ -81,7 +82,7 @@ class Sun:
 
     def fit(self, world):
         self.x, self.y = world[0] * 0.5, world[1] * 0.5
-        self.r = max(5.0, min(10.0, world[1] * 0.11))
+        self.r = max(5.0, min(10.0, world[1] * 0.11)) * config.SCALE
 
     def pull(self, x, y, world):
         """Acceleration toward the star, for something at (x, y)."""

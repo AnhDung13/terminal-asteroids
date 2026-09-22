@@ -56,24 +56,43 @@ there is no cycle to unpick and any one of them can be read on its own:
 
 |                                                      |                                                          |
 | ---------------------------------------------------- | -------------------------------------------------------- |
-| [`spacewar/config.py`](spacewar/config.py)           | tunables, the bell, the save file, wrap-aware geometry   |
-| [`spacewar/colors.py`](spacewar/colors.py)           | named curses attributes and the ramps that shade them    |
-| [`spacewar/screen.py`](spacewar/screen.py)           | the braille pixel buffer and the play field's view of it |
-| [`spacewar/hulls.py`](spacewar/hulls.py)             | every ship's silhouette, as polylines                    |
-| [`spacewar/entities.py`](spacewar/entities.py)       | your ship, rocks, rounds, salvage, particles             |
-| [`spacewar/fleet.py`](spacewar/fleet.py)             | the hostile ships and how each class behaves             |
-| [`spacewar/sectors.py`](spacewar/sectors.py)         | the rule that changes every tenth wave                   |
-| [`spacewar/render.py`](spacewar/render.py)           | how a `Game` draws itself                                |
-| [`spacewar/game.py`](spacewar/game.py)               | the simulation                                           |
-| [`spacewar/input.py`](spacewar/input.py)             | held keys, from a terminal that will not say             |
-| [`spacewar/app.py`](spacewar/app.py)                 | the frame loop                                           |
-| [`spacewar/diagnostics.py`](spacewar/diagnostics.py) | `--selftest` and `--keytest`                             |
+| [`game/config.py`](game/config.py)           | tunables, the bell, the save file, wrap-aware geometry   |
+| [`game/scale.py`](game/scale.py)             | the size dial, and everything that follows from it       |
+| [`game/colors.py`](game/colors.py)           | named curses attributes and the ramps that shade them    |
+| [`game/screen.py`](game/screen.py)           | the braille pixel buffer and the play field's view of it |
+| [`game/hulls.py`](game/hulls.py)             | every ship's silhouette, as polylines                    |
+| [`game/entities.py`](game/entities.py)       | your ship, rocks, rounds, salvage, particles             |
+| [`game/fleet.py`](game/fleet.py)             | the hostile ships and how each class behaves             |
+| [`game/sectors.py`](game/sectors.py)         | the rule that changes every tenth wave                   |
+| [`game/render.py`](game/render.py)           | how a `Game` draws itself                                |
+| [`game/game.py`](game/game.py)               | the simulation                                           |
+| [`game/input.py`](game/input.py)             | held keys, from a terminal that will not say             |
+| [`game/app.py`](game/app.py)                 | the frame loop                                           |
+| [`game/diagnostics.py`](game/diagnostics.py) | `--selftest` and `--keytest`                             |
 
 `Game` is split across two files because it is two jobs: `game.py` runs the
 simulation, `render.py` is a mixin holding every method that draws. They are
 one class rather than two objects because the drawing reads the game's own
 state and nothing else — handing a dozen fields across a boundary would buy
 nothing.
+
+**How big everything is** is one dial, and it is yours: press `-` and `=` while
+playing to step it between 50% and 140%, and it is remembered with your high
+score. It multiplies every hull, rock, magazine and mine — both the drawn size
+and the radius you are hit on, so the art never stops matching the hitboxes —
+and it resizes what is already on the field, so you never end up flying a small
+ship among old, large boulders. It deliberately does *not* touch the field, the
+speeds or the standoff distances the fleet keeps, so turning it down gives you
+more room to fly in and a smaller thing to be hit on without slowing the game
+or spreading the fight out.
+
+In code it lives in [`game/scale.py`](game/scale.py), which is the one place
+that multiplies anything. Every size is written at its natural value where it
+belongs — `Ship.RADIUS` is `3.0`, a large rock is `15.0` — and `scale.apply()`
+rewrites the live values from a record of those naturals taken at import. From
+the naturals rather than from the current values on purpose: scaling by 0.5 and
+back by 2.0 drifts, and would grind a rock away to nothing after enough turns
+of the dial.
 
 ## Controls
 
@@ -86,6 +105,7 @@ nothing.
 | `0` `.` `,` `5`    | all stop                                                    |
 | `X`                | hyperspace: jump somewhere else, 3s cooldown                |
 | `Z`                | fire a held bomb: every hostile round gone, every hull hurt |
+| `-` `=`            | smaller / bigger: the size dial, 50%–140%, saved            |
 | `M`                | switch flight model                                         |
 | `P`                | pause                                                       |
 | `R`                | restart                                                     |
@@ -153,13 +173,30 @@ around it, and their range scales with your window, so a shot always crosses
 the same fraction of the screen whether you play in a small terminal or
 fullscreen.
 
-Asteroids split in two on each hit — large → medium → small → gone. They are
-also cover: a hostile round that meets a rock stops there, so a boulder between
-you and a gunship is worth keeping. Three lives and an extra ship every 20,000
-points. A wave ends when its fleet is destroyed; leftover rocks drift on into
-the next one. Ramming a fighter kills you and it both; ramming a capital ship
-only dents it. Game over reports your score, waves survived, shooting accuracy
-and your longest chain.
+Asteroids split in two on each hit — large → medium → small → gone. Three
+lives and an extra ship every 20,000 points. A wave ends when its fleet is
+destroyed; leftover rocks drift on into the next one. Ramming a fighter kills
+you and it both; ramming a capital ship only dents it. Game over reports your
+score, waves survived, shooting accuracy and your longest chain.
+
+**A rock belongs to nobody.** It is cover, and it is cover from both sides: a
+round from either you or them stops at a boulder and breaks it, so putting one
+between yourself and a gunship still buys you time — it just does not last for
+ever, and neither side gets a free shield.
+
+Running into one hits a hull for **one point, the same as a round from your own
+gun**. An interceptor is gone; a gunship is one scrape from it; a capital ship
+is only dented, exactly as it is when you ram it. You have no hull points, so a
+rock is still the end of you unless a shield eats it. The rock breaks either
+way, whether or not the hull it met survived, so a heavy ploughing through a
+field pays for every fragment it clips.
+
+That is why the fleet flies _around_ boulders. Every hostile ship looks ahead
+along its own course and the rock's, finds the moment the two would be closest,
+and steers off that line — sideways, which is the way out, rather than backwards,
+which is not. A collision scores you nothing: the rock did it, not you. The one
+exception is a rock _you_ kicked, below — that one carries your shot's force,
+does damage by size, and counts.
 
 **Rocks are ammunition.** When one of your shots splits a rock, the two
 fragments fly off _along the shot_ — fast, hot, drawn in fire colours with a
@@ -262,19 +299,19 @@ the fleet through wave 10 — how many ships, how fast, and how often they fire.
 
 | Wave | Fleet                                     | Rocks | Interceptor speed | Volley gap |
 | ---- | ----------------------------------------- | ----- | ----------------- | ---------- |
-| 1    | 3 interceptor                             | 2     | 52 px/s           | 1.9 s      |
-| 3    | 4 interceptor, 1 gunship                  | 3     | 54 px/s           | 1.8 s      |
-| 5    | 4 interceptor, 2 gunship, **Marauder**    | 3     | 58 px/s           | 1.7 s      |
-| 8    | 7 interceptor, 2 gunship                  | 4     | 67 px/s           | 1.5 s      |
-| 10   | 4 interceptor, 3 gunship, **Dreadnought** | 5     | 74 px/s           | 1.2 s      |
-| 15   | 4 interceptor, 2 gunship, **Marauder**    | 6     | 74 px/s           | 1.2 s      |
-| 20   | 4 interceptor, 3 gunship, **Dreadnought** | 6     | 74 px/s           | 1.2 s      |
+| 1    | 2 interceptor                             | 1     | 52 px/s           | 1.9 s      |
+| 3    | 2 interceptor                             | 1     | 54 px/s           | 1.8 s      |
+| 5    | 3 interceptor, 1 gunship, **Marauder**    | 2     | 58 px/s           | 1.7 s      |
+| 8    | 4 interceptor, 1 gunship                  | 2     | 67 px/s           | 1.5 s      |
+| 10   | 3 interceptor, 2 gunship, **Dreadnought** | 3     | 74 px/s           | 1.2 s      |
+| 15   | 3 interceptor, 1 gunship, **Marauder**    | 3     | 74 px/s           | 1.2 s      |
+| 20   | 3 interceptor, 2 gunship, **Dreadnought** | 3     | 74 px/s           | 1.2 s      |
 
 A class fires at its quoted gap from wave 1 and closes to two thirds of it by
 wave 10. Those gaps are per ship, and jittered ±20% on each reload, so what
 you actually face is the whole fleet's fire overlapping.
 
-Ships arrive a few at a time rather than all at once, at most seven escorts on
+Ships arrive a few at a time rather than all at once, at most five escorts on
 the field, and a capital ship is extra on top of that. The Marauder on wave 5
 is the first real wall — it is the first thing that will not die to one pass,
 and the first that comes to you rather than waiting. Every tender that jumps

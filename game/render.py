@@ -8,6 +8,7 @@ dozen fields across a boundary would buy nothing.
 import math
 import time
 
+from . import config
 from .colors import A, ramp
 from .entities import WEAPONS
 from .screen import Field
@@ -99,6 +100,7 @@ class GameRender:
             self.draw_over(sc)
         elif self.state == "paused":
             self.panel(sc, ["PAUSED", "", "P  resume       M  flight model",
+                            "- =  size",
                             "R  restart      Q  quit"])
         elif (self.state == "play" and self.break_t is not None and
               self.card and (self.break_t > 0.35 or
@@ -326,7 +328,8 @@ class GameRender:
              A("dim")),
             (2, "guns fire themselves - fly to aim      X hyperspace",
              A("ui")),
-            (3, "M  flight model:  %s" % mode, A("warn")),
+            (3, "M  flight model:  %s        - =  size:  %d%%"
+                % (mode, round(config.SCALE * 100)), A("warn")),
             (5, "interceptor 150   gunship 400   rocks 20/50/100", A("dim")),
             (6, "MARAUDER every 5th wave 2500   DREADNOUGHT every 10th 12000",
              A("warn")),

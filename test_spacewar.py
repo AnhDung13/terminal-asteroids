@@ -5,6 +5,7 @@
 
 Headless: no terminal is needed, and the save file goes to a temp path.
 """
+import math
 import os
 import random
 import tempfile
@@ -72,20 +73,31 @@ class DifficultyTests(unittest.TestCase):
         g = game()
         g.level = 10
         r = g.roster()
-        self.assertEqual(r[0], "dread")
-        self.assertEqual(len(r), 8)
+        self.assertEqual(r[0], "dread")           # the capital ship leads
+        self.assertEqual(r.count("dread"), 1)
         g.level = 5
         r = g.roster()
         self.assertEqual(r[0], "marauder")
         self.assertNotIn("dread", r)
         g.level = 1
-        self.assertEqual(sorted(g.roster()), ["scout"] * 3)
+        self.assertEqual(set(g.roster()), {"scout"})
+
+    def test_waves_stay_small_enough_to_fly_in(self):
+        """A wave you cannot get out from under is not difficulty, it is a
+        wall. Escorts are capped on the field and in the queue alike."""
+        g = game()
+        for lv in range(1, 41):
+            g.level = lv
+            escorts = [k for k in g.roster() if k not in Raider.BOSSES]
+            self.assertLessEqual(len(escorts), 9, "wave %d" % lv)
+            self.assertLessEqual(g.rock_count(), 8, "wave %d" % lv)
 
     def test_boss_is_not_an_escort(self):
         g = game()
+        n = g.MAX_FOES - 1
         g.foes = [Raider("dread", 10, 10, 1.0, g.world)]
-        g.foes += [Raider("scout", 10, 10, 0.0, g.world) for _ in range(6)]
-        self.assertEqual(g.escorts(), 6)
+        g.foes += [Raider("scout", 10, 10, 0.0, g.world) for _ in range(n)]
+        self.assertEqual(g.escorts(), n)
         self.assertLess(g.escorts(), g.MAX_FOES)
 
 
@@ -155,6 +167,137 @@ class ScoringTests(unittest.TestCase):
         self.assertIsNone(g.ship)
         self.assertEqual(g.combo, 0)
         self.assertEqual(g.weapon, "gauss")
+
+
+class ScaleTests(unittest.TestCase):
+    """The size dial has to reach everything on the field, or the art stops
+    matching the hitboxes and the gun stops firing from the nose - and it has
+    to keep doing so after the player has turned it."""
+
+    # Building a Game applies the size saved on disk, so these have to put
+    # both the dial and the save file back or they leak into every test that
+    # constructs a Game after them.
+    def setUp(self):
+        self.path = os.environ["SPACEWAR_STATE"]
+        self._was = ast.config.SCALE
+        self._saved = (open(self.path).read()
+                       if os.path.exists(self.path) else None)
+        ast.scale.apply(1.0)
+
+    def tearDown(self):
+        if self._saved is None:
+            if os.path.exists(self.path):
+                os.remove(self.path)
+        else:
+            with open(self.path, "w") as fh:
+                fh.write(self._saved)
+        ast.scale.apply(self._was)
+
+    def sizes(self):
+        return dict(ship=Ship.RADIUS, draw=Ship.DRAW_R,
+                    rock3=Asteroid.SPECS[3][0], rock1=Asteroid.SPECS[1][0],
+                    pickup=ast.Pickup.R, mine=Mine.R,
+                    scout=Raider.SPECS["scout"]["r"],
+                    dread=Raider.SPECS["dread"]["r"])
+
+    def test_default_is_full_size(self):
+        """With nothing saved, the game is the size it was designed at."""
+        if os.path.exists(self.path):
+            os.remove(self.path)
+        ast.scale.apply(0.5)                      # anything but the default
+        Game(110, 34)
+        self.assertEqual(ast.config.SCALE, 1.0)
+
+    def test_every_drawn_size_rides_the_dial(self):
+        for value in (0.5, 1.0, 1.4):
+            ast.scale.apply(value)
+            s = self.sizes()
+            self.assertAlmostEqual(s["ship"], 3.0 * value)
+            self.assertAlmostEqual(s["draw"], 10.0 * value)
+            self.assertAlmostEqual(s["rock3"], 15.0 * value)
+            self.assertAlmostEqual(s["rock1"], 5.5 * value)
+            self.assertAlmostEqual(s["pickup"], 7.0 * value)
+            self.assertAlmostEqual(s["mine"], 3.5 * value)
+            self.assertAlmostEqual(s["scout"], 8.5 * value)
+            self.assertAlmostEqual(s["dread"], 24.0 * value)
+
+    def test_the_dial_is_reversible(self):
+        """Every size is recomputed from the naturals, not from wherever the
+        dial left them - or turning it up and down would drift."""
+        before = self.sizes()
+        for v in (0.5, 1.4, 0.7, 0.85, 1.0):
+            ast.scale.apply(v)
+        for k, v in self.sizes().items():
+            self.assertAlmostEqual(v, before[k], msg=k)
+
+    def test_the_dial_clamps_to_its_steps(self):
+        self.assertEqual(ast.scale.apply(99.0), ast.config.SCALE_STEPS[-1])
+        self.assertEqual(ast.scale.apply(0.0), ast.config.SCALE_STEPS[0])
+
+    def test_zoom_walks_the_steps_and_stops_at_the_ends(self):
+        steps = ast.config.SCALE_STEPS
+        g = hold(game())
+        ast.scale.apply(steps[0])
+        for _ in range(len(steps) + 3):
+            g.zoom(1)
+        self.assertEqual(ast.config.SCALE, steps[-1])
+        for _ in range(len(steps) + 3):
+            g.zoom(-1)
+        self.assertEqual(ast.config.SCALE, steps[0])
+
+    def test_zoom_resizes_what_is_already_flying(self):
+        """Or you fly a small ship among boulders still the old size."""
+        g = hold(game())
+        ast.scale.apply(1.0)
+        rock = Asteroid(60, 60, 3, 1.0)
+        foe = Raider("gunship", 90, 60, 0.0, g.world)
+        g.asteroids, g.foes = [rock], [foe]
+        r0, f0, shape0 = rock.r, foe.r, rock.shape[0][1]
+        g.zoom(-1)
+        ratio = ast.config.SCALE / 1.0
+        self.assertAlmostEqual(rock.r, r0 * ratio)
+        self.assertAlmostEqual(foe.r, f0 * ratio)
+        self.assertAlmostEqual(rock.shape[0][1], shape0 * ratio)
+
+    def test_muzzle_sits_on_the_drawn_nose_at_any_size(self):
+        """The gun fires from hull()[0]; that point has to stay on the hull."""
+        for value in (0.5, 1.0, 1.4):
+            ast.scale.apply(value)
+            g = hold(game())
+            s = g.ship
+            s.ang = 0.0
+            nose = s.hull()[0]
+            reach = math.hypot(nose[0] - s.x, nose[1] - s.y)
+            self.assertLess(reach, Ship.DRAW_R * 1.4)
+            self.assertGreater(reach, Ship.DRAW_R * 0.5)
+
+    def test_hit_radius_stays_inside_the_drawn_hull(self):
+        for value in (0.5, 1.0, 1.4):
+            ast.scale.apply(value)
+            self.assertLess(Ship.RADIUS, Ship.DRAW_R)
+
+    def test_speeds_are_not_scaled(self):
+        """Scaling is about room, not pace: it must not slow the game."""
+        ast.scale.apply(0.5)
+        self.assertAlmostEqual(Ship.ARCADE_SPEED, 95.0)
+        self.assertAlmostEqual(Bullet.SPEED, 190.0)
+        self.assertAlmostEqual(Raider.SPECS["scout"]["speed"], 64.0)
+        self.assertAlmostEqual(Raider.SPECS["scout"]["keep"], 46.0)
+
+    def test_the_size_survives_a_restart(self):
+        g = hold(game())
+        g.zoom(-1)
+        chosen = ast.config.SCALE
+        ast.scale.apply(1.0)                      # as a fresh process would
+        self.assertEqual(Game(110, 34).load_state()[2], chosen)
+        self.assertAlmostEqual(ast.config.SCALE, chosen)
+
+    def test_an_old_save_file_without_a_size_still_loads(self):
+        with open(os.environ["SPACEWAR_STATE"], "w") as fh:
+            fh.write("4321 classic\n")
+        high, mode, size = Game(110, 34).load_state()
+        self.assertEqual((high, mode), (4321, "classic"))
+        self.assertEqual(size, ast.config.SCALE)
 
 
 class CadenceTests(unittest.TestCase):
@@ -235,17 +378,105 @@ class GearTests(unittest.TestCase):
 
 
 class RockCoverTests(unittest.TestCase):
-    def test_rock_stops_hostile_round(self):
-        g = game()
-        g.foes = []
+    """A rock belongs to nobody: it stops rounds from either side, breaks to
+    rounds from either side, and kills any hull that runs into it."""
+
+    def test_rock_stops_hostile_round_and_breaks(self):
+        g = hold(game())
         a = ast.Asteroid(50, 50, 3, 1.0)
         g.asteroids = [a]
         g.bullets = [Bullet(50, 50, 0, 0, 5, hostile=True)]
-        g.ship.x, g.ship.y = 150, 100
         g.collisions()
-        self.assertEqual(g.bullets, [])
-        self.assertIn(a, g.asteroids)
-        self.assertGreater(a.flash, 0)
+        self.assertEqual(g.bullets, [])           # the round is spent...
+        self.assertNotIn(a, g.asteroids)          # ...and the rock is gone
+        self.assertEqual(len(g.asteroids), 2)     # into two fragments
+
+    def test_a_round_of_theirs_leaves_the_fragments_cold(self):
+        """Only a rock you kicked is a weapon - or the fleet would be arming
+        rocks against itself every time it cleared cover."""
+        g = hold(game())
+        g.asteroids = [ast.Asteroid(50, 50, 3, 1.0)]
+        g.bullets = [Bullet(50, 50, 40, 0, 5, hostile=True)]
+        g.collisions()
+        self.assertTrue(g.asteroids)
+        self.assertTrue(all(f.hot <= 0 for f in g.asteroids))
+
+    def test_their_round_scores_you_nothing(self):
+        g = hold(game())
+        g.asteroids = [ast.Asteroid(50, 50, 2, 1.0)]
+        g.bullets = [Bullet(50, 50, 0, 0, 5, hostile=True)]
+        before = g.score
+        g.collisions()
+        self.assertEqual(g.score, before)
+
+    def test_a_rock_hits_a_hull_for_one_point(self):
+        """The same one point your own gun does - so an interceptor is gone
+        and a capital ship is only dented."""
+        g = hold(game())
+        scout = Raider("scout", 50, 50, 0.0, g.world)
+        scout.arrive = 0
+        g.asteroids = [Asteroid(50, 50, 3, 1.0)]
+        g.foes = [scout]
+        before = g.score
+        g.collisions()
+        self.assertNotIn(scout, g.foes)            # one hull point, one hp
+        self.assertEqual(g.score, before)          # the rock did it, not you
+
+        g = hold(game())
+        dread = Raider("dread", 50, 50, 0.0, g.world)
+        dread.arrive = 0
+        g.asteroids = [Asteroid(50, 50, 3, 1.0)]
+        g.foes = [dread]
+        g.collisions()
+        self.assertIn(dread, g.foes)               # a boulder does not gut it
+        self.assertEqual(dread.hp, dread.hp0 - g.ROCK_DMG)
+
+    def test_the_rock_breaks_whether_or_not_the_hull_dies(self):
+        g = hold(game())
+        dread = Raider("dread", 50, 50, 0.0, g.world)
+        dread.arrive = 0
+        a = Asteroid(50, 50, 3, 1.0)
+        g.asteroids = [a]
+        g.foes = [dread]
+        g.collisions()
+        self.assertIn(dread, g.foes)               # survived...
+        self.assertNotIn(a, g.asteroids)           # ...the rock did not
+        self.assertEqual(len(g.asteroids), 2)      # it split in two
+
+    def test_a_smallest_rock_just_goes(self):
+        g = hold(game())
+        foe = Raider("dread", 50, 50, 0.0, g.world)
+        foe.arrive = 0
+        g.asteroids = [Asteroid(50, 50, 1, 1.0)]
+        g.foes = [foe]
+        g.collisions()
+        self.assertEqual(g.asteroids, [])          # nothing left to split
+
+    def test_a_foe_still_fading_in_is_not_hit(self):
+        g = hold(game())
+        g.asteroids = [Asteroid(50, 50, 3, 1.0)]
+        foe = Raider("scout", 50, 50, 0.0, g.world)
+        foe.arrive = 0.5
+        g.foes = [foe]
+        g.collisions()
+        self.assertIn(foe, g.foes)
+
+    def test_foes_steer_around_a_rock(self):
+        """Put a boulder on the line between a scout and the ship: it must
+        not end the run sitting on top of the rock."""
+        g = hold(game())
+        world = g.world
+        g.ship.x, g.ship.y = 40.0, 60.0
+        rock = Asteroid(110.0, 60.0, 3, 1.0)
+        rock.vx = rock.vy = rock.spin = 0.0
+        foe = Raider("scout", 180.0, 60.0, 0.0, world)
+        foe.arrive = 0.0
+        closest = 1e9
+        for _ in range(600):
+            foe.update(1 / 60, world, g.ship, [], None, [rock])
+            closest = min(closest, g.wrap_dist(foe.x, foe.y,
+                                               rock.x, rock.y))
+        self.assertGreater(closest, rock.r + foe.r)
 
 
 class HotRockTests(unittest.TestCase):
@@ -281,17 +512,32 @@ class HotRockTests(unittest.TestCase):
         self.assertNotIn(a, g.asteroids)
         self.assertNotIn(gun, g.foes)             # 2 hull points, 2 hp
 
-    def test_cool_rock_is_harmless(self):
+    def test_a_rock_you_kicked_hits_harder_than_one_they_drifted_into(self):
+        """A kicked fragment carries your shot's force: damage by size, and
+        it scores. A cold rock is just mass in the way: one point, no score.
+        That is what keeps shooting rocks at them worth doing."""
         g = hold(game())
-        a = Asteroid(50, 50, 2, 1.0)
-        g.asteroids = [a]
+        hot = Asteroid(50, 50, 2, 1.0)          # medium: 2 hull points
+        hot.kick(1, 0)
+        g.asteroids = [hot]
+        gun = Raider("gunship", 55, 50, 0.0, g.world)   # 2 hp
+        gun.arrive = 0
+        g.foes = [gun]
+        before = g.score
+        g.collisions()
+        self.assertNotIn(gun, g.foes)           # 2 points kills it outright
+        self.assertGreater(g.score, before)
+
+        g = hold(game())
+        g.asteroids = [Asteroid(50, 50, 2, 1.0)]        # same rock, cold
         gun = Raider("gunship", 55, 50, 0.0, g.world)
         gun.arrive = 0
         g.foes = [gun]
+        before = g.score
         g.collisions()
-        self.assertIn(a, g.asteroids)
-        self.assertIn(gun, g.foes)
-        self.assertEqual(gun.hp, gun.hp0)
+        self.assertIn(gun, g.foes)              # one point: it survives
+        self.assertEqual(gun.hp, gun.hp0 - g.ROCK_DMG)
+        self.assertEqual(g.score, before)
 
     def test_fragment_cools_and_slows(self):
         a = Asteroid(50, 50, 1, 1.0)

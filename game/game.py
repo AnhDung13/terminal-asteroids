@@ -4,7 +4,7 @@ import math
 import random
 import time
 
-from . import config
+from . import config, scale
 from .colors import A
 from .config import TAU, beep, wrap_delta
 from .entities import (GEAR_ODDS, ITEMS, WEAPON_KINDS, WEAPONS, Asteroid,
@@ -16,15 +16,15 @@ from .screen import PX, PY, Screen
 from .sectors import SECTOR_CYCLE, SECTOR_WAVES, SECTORS, Mine, Sun
 
 
-
 class Game(GameRender):
     def __init__(self, w, h, mode="arcade"):
         self.screen = Screen(w, h)
         self.mode = mode
         self.layout(w, h)
-        self.high, saved_mode = self.load_state()
+        self.high, saved_mode, saved_size = self.load_state()
         if saved_mode in ("arcade", "classic"):
             self.mode = saved_mode
+        scale.apply(saved_size)
         self.state = "title"
         self.msg = ""
         self.msg_t = self.msg_t0 = 0.0
@@ -93,9 +93,9 @@ class Game(GameRender):
         # Rocks are scenery now - something to dodge while you fight, not the
         # objective. A handful, and never a field to grind through - except
         # in a debris field, where the field is the point.
-        n = min(2 + self.level // 3, 6)
+        n = min(1 + self.level // 5, 3)
         if self.cur == "debris":
-            n = min(n * 2 + 2, 14)
+            n = min(n * 2 + 2, 8)
         return n
 
     ROCK_INFLOW = 4.0       # debris field: seconds between fresh boulders
@@ -136,7 +136,7 @@ class Game(GameRender):
             return False
         return self.wrap_dist(self.ship.x, self.ship.y, x, y) > self.vis()
 
-    MAX_FOES = 7            # escorts on screen at once; a boss is extra
+    MAX_FOES = 5            # escorts on screen at once; a boss is extra
 
     def escorts(self):
         return sum(1 for f in self.foes if not f.boss)
@@ -157,12 +157,12 @@ class Game(GameRender):
         """
         lv = self.level
         if self.is_boss_wave():
-            out = ["dread"] + ["gunship"] * (3 + self.debt) + ["scout"] * 4
+            out = ["dread"] + ["gunship"] * (2 + self.debt) + ["scout"] * 3
         elif self.is_mini_wave():
-            out = ["marauder"] + ["gunship"] * (2 + self.debt) + ["scout"] * 4
+            out = ["marauder"] + ["gunship"] * (1 + self.debt) + ["scout"] * 3
         else:
-            scouts = min(3 + lv // 2, 10)
-            guns = min(lv // 3, 5) + self.debt
+            scouts = min(2 + lv // 4, 5)
+            guns = min(lv // 5, 2) + self.debt
             out = ["scout"] * scouts + ["gunship"] * guns
             random.shuffle(out)
             if lv >= self.TENDER_EVERY and lv % self.TENDER_EVERY == 0:
@@ -198,17 +198,22 @@ class Game(GameRender):
 
     # -- persistence ------------------------------------------------------
     def load_state(self):
+        """high score, flight model, size dial. Old files have fewer fields;
+        anything missing keeps its default rather than failing the load."""
         try:
             with open(config.STATE_FILE) as fh:
                 parts = fh.read().split()
-            return int(parts[0]), (parts[1] if len(parts) > 1 else "")
+            size = (float(parts[2]) if len(parts) > 2
+                    else config.SCALE_DEFAULT)
+            return int(parts[0]), (parts[1] if len(parts) > 1 else ""), size
         except Exception:
-            return 0, ""
+            return 0, "", config.SCALE_DEFAULT
 
     def save_state(self):
         try:
             with open(config.STATE_FILE, "w") as fh:
-                fh.write("%d %s\n" % (self.high, self.mode))
+                fh.write("%d %s %.2f\n" % (self.high, self.mode,
+                                           config.SCALE))
         except Exception:
             pass
 
@@ -478,6 +483,11 @@ class Game(GameRender):
         self.shocks.append(Shock(s.x, s.y, 3, 24, 0.4))
         self.burst(s.x, s.y, 14, 70, 0.45)
 
+    # What a drifting rock does to a hull it meets: the same one point as a
+    # round from your own gun. It is the mass that hits, not the shot, so it
+    # does not care whose hull it is - but a capital ship has to be worn down
+    # by rocks exactly as it has to be worn down by fire.
+    ROCK_DMG = 1
     BOMB_DMG = 4               # kills any escort outright, dents a boss
     BOMB_MAX = 3
 
@@ -526,6 +536,21 @@ class Game(GameRender):
             self.flash("DREADNOUGHT ENRAGED", 1.6)
             self.shocks.append(Shock(foe.x, foe.y, foe.r, foe.r * 3.0, 0.5))
             beep()
+
+    def zoom(self, delta):
+        """Turn the size dial a notch, and bring the field with it.
+
+        Everything already flying is resized by the same ratio, so the dial
+        never leaves you with a small ship among old, large boulders.
+        """
+        want = scale.step(delta)
+        if want == config.SCALE:
+            return
+        ratio = want / config.SCALE
+        scale.apply(want)
+        scale.resize(ratio, self.asteroids, self.foes, self.sun, self.world)
+        self.flash("SIZE  %d%%" % round(want * 100), 1.0)
+        self.save_state()
 
     def toggle_mode(self):
         self.mode = "classic" if self.mode == "arcade" else "arcade"
@@ -589,7 +614,8 @@ class Game(GameRender):
             if self.sun is not None:
                 self.sun.update(dt)
             for foe in self.foes:
-                foe.update(dt, self.world, None, self.bullets, self.sun)
+                foe.update(dt, self.world, None, self.bullets, self.sun,
+                           self.asteroids)
             for b in self.bullets:
                 b.update(dt, self.world)
             self.bullets = [b for b in self.bullets if b.life > 0]
@@ -652,7 +678,8 @@ class Game(GameRender):
             self.spawn_foe(self.queue.pop(0))
             self.spawn_cd = self.spawn_gap()
         for foe in self.foes:
-            foe.update(dt, self.world, self.ship, self.bullets, self.sun)
+            foe.update(dt, self.world, self.ship, self.bullets, self.sun,
+                       self.asteroids)
         for foe in list(self.foes):
             if foe.escape is not None and foe.escape <= 0:
                 self.escape_foe(foe)
@@ -781,7 +808,7 @@ class Game(GameRender):
                         self.bullets.remove(b)
                     break
         for foe in self.foes:
-            foe.update(dt, self.world, s, self.bullets)
+            foe.update(dt, self.world, s, self.bullets, None, self.asteroids)
         for b in list(self.bullets):
             if b.hostile:
                 continue
@@ -803,14 +830,16 @@ class Game(GameRender):
     def collisions(self):
         for b in list(self.bullets):
             if b.hostile:
-                # Rocks are cover: a round that meets one stops there. Put a
-                # boulder between you and a gunship and it has earned its
-                # place on the field.
-                for a in self.asteroids:
+                # Rocks are cover, but not a wall only they have to respect:
+                # a round from either side breaks one. A boulder between you
+                # and a gunship still earns its place - it just does not last
+                # for ever, and neither of you gets a free shield out of it.
+                # The fragments are cold, though: only a rock *you* kicked is
+                # a weapon.
+                for a in list(self.asteroids):
                     if self.wrap_dist(b.x, b.y, a.x, a.y) < a.r:
                         self.bullets.remove(b)
-                        a.flash = 0.06
-                        self.burst(b.x, b.y, 2, 26, 0.15)
+                        self.split(a, award=False)
                         break
                 continue
             for foe in list(self.foes):          # ships first: they are the
@@ -844,7 +873,8 @@ class Game(GameRender):
                             self.hits += 1
                         break
 
-        # A hot fragment is your round now: it hurts the first hull it meets.
+        # A hot fragment is your round now: it hurts the first hull it meets,
+        # and that one scores, because you put it there.
         for a in list(self.asteroids):
             if a.hot <= 0:
                 continue
@@ -853,6 +883,27 @@ class Game(GameRender):
                     continue
                 if self.wrap_dist(a.x, a.y, foe.x, foe.y) < a.r + foe.r * 0.8:
                     self.smash(a, foe)
+                    break
+
+        # A cold rock belongs to nobody, and it hits like one of your rounds:
+        # one hull point. An interceptor is gone, a gunship is one scrape from
+        # it, a capital ship is dented - the same shape as ramming, where a
+        # fighter dies and a Dreadnought does not. It scores nothing, because
+        # the rock did it and not you. The rock breaks either way, so a heavy
+        # ploughing through a field pays for every fragment it clips.
+        for a in list(self.asteroids):
+            if a.hot > 0 or a not in self.asteroids:
+                continue
+            for foe in list(self.foes):
+                if foe.arrive > 0:
+                    continue
+                if self.wrap_dist(a.x, a.y, foe.x, foe.y) < a.r + foe.r * 0.8:
+                    if foe.hit(self.ROCK_DMG):
+                        self.kill_foe(foe, award=False)
+                    else:
+                        self.burst(a.x, a.y, 6, 44, 0.25)
+                        self.rage_check(foe)
+                    self.split(a, award=False)
                     break
 
         # Mines: a shot of yours, or any hull too close, sets one off.

@@ -23,6 +23,20 @@ def beep():
     except curses.error:
         pass
 
+# How big everything on the field is drawn, and is hit. One dial, applied to
+# every hull, rock, magazine and mine - the field, the speeds and the standoff
+# distances are deliberately left alone, so turning it down does not slow the
+# game or spread the fight out: it just gives you more room to fly in and a
+# smaller thing to be hit on.
+#
+# Never read this at import time - the player changes it while playing, with
+# - and =, so read config.SCALE where you need it and let scale.apply() do
+# the rest. Anything that multiplied it into a class attribute once would
+# still be holding the size the game started at.
+SCALE_DEFAULT = 1.0     # the size the game is designed at
+SCALE = SCALE_DEFAULT   # the size it is being played at right now
+SCALE_STEPS = (0.5, 0.6, 0.7, 0.85, 1.0, 1.2, 1.4)
+
 # Overridable so tests never clobber a real player's save file.
 STATE_FILE = os.environ.get(
     "SPACEWAR_STATE",

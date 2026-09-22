@@ -34,7 +34,12 @@ the ones above it, so there is no cycle to unpick:
 """
 
 from .colors import A, PAL, RAMPS, init_colors, ramp
-from .config import FPS, MIN_H, MIN_W, SOUND, STATE_FILE, TAU, beep
+# config and scale are re-exported as modules, never as values: the size
+# dial moves while the game runs, so a `from .config import SCALE` here
+# would hand everyone the number the game started with.
+from . import config, scale
+from .config import (FPS, MIN_H, MIN_W, SOUND, STATE_FILE, TAU, beep,
+                     wrap_delta)
 from .diagnostics import keytest, report_keytest, selftest
 from .entities import (GEAR, GEAR_ODDS, ITEMS, WEAPON_KINDS, WEAPONS,
                        Asteroid, Bullet, Debris, Particle, Pickup, Pop,
@@ -59,5 +64,5 @@ __all__ = [
     "Screen", "Shock", "Ship", "Star", "Sun", "TAU", "WEAPONS",
     "WEAPON_KINDS", "beep", "draw_hull", "flip", "init_colors", "keytest",
     "kitty_probe", "loop", "ramp", "report_keytest", "run", "selftest",
-    "tty_write",
+    "config", "scale", "tty_write", "wrap_delta",
 ]

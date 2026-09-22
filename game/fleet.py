@@ -4,6 +4,7 @@ import math
 import random
 
 from .colors import A, ramp
+from . import config
 from .config import TAU, wrap_delta
 from .entities import Bullet
 from .hulls import (DREADNOUGHT, DREADNOUGHT_ENG, GUNSHIP, GUNSHIP_ENG,
@@ -36,23 +37,26 @@ class Raider:
     # lead: how much of your motion the gunner allows for - 0 fires at where
     # you are, 1 is a clean intercept on a ship that holds its course.
     SPECS = {
-        "scout": dict(r=8.5, hp=1, speed=64.0, cd=1.9, shots=1, jitter=0.26,
-                      bsp=78.0, value=150, shape=SCOUT, eng=SCOUT_ENG,
-                      keep=46.0, col="foe1", turn=5.0, lead=0.0),
-        "gunship": dict(r=12.0, hp=2, speed=46.0, cd=1.7, shots=2, jitter=0.16,
-                        bsp=88.0, value=400, shape=GUNSHIP, eng=GUNSHIP_ENG,
-                        keep=86.0, col="foe2", turn=3.4, lead=1.0),
+        "scout": dict(r=8.5, hp=1, speed=64.0, cd=1.9, shots=1,
+                      jitter=0.26, bsp=78.0, value=150, shape=SCOUT,
+                      eng=SCOUT_ENG, keep=46.0, col="foe1", turn=5.0,
+                      lead=0.0),
+        "gunship": dict(r=12.0, hp=2, speed=46.0, cd=1.7, shots=2,
+                        jitter=0.16, bsp=88.0, value=400, shape=GUNSHIP,
+                        eng=GUNSHIP_ENG, keep=86.0, col="foe2", turn=3.4,
+                        lead=1.0),
         "marauder": dict(r=15.0, hp=11, speed=32.0, cd=1.35, shots=4,
                          jitter=0.13, bsp=80.0, value=2500, shape=MARAUDER,
                          eng=MARAUDER_ENG, keep=104.0, col="foe3",
                          turn=2.4, lead=0.0),
-        "dread": dict(r=24.0, hp=28, speed=23.0, cd=1.15, shots=7, jitter=0.10,
-                      bsp=74.0, value=12000, shape=DREADNOUGHT,
+        "dread": dict(r=24.0, hp=28, speed=23.0, cd=1.15, shots=7,
+                      jitter=0.10, bsp=74.0, value=12000, shape=DREADNOUGHT,
                       eng=DREADNOUGHT_ENG, keep=134.0, col="foe4",
                       turn=1.7, lead=0.6),
-        "tender": dict(r=11.0, hp=3, speed=46.0, cd=9.9, shots=0, jitter=0.0,
-                       bsp=1.0, value=600, shape=TENDER, eng=TENDER_ENG,
-                       keep=0.0, col="foe5", turn=2.6, lead=0.0),
+        "tender": dict(r=11.0, hp=3, speed=46.0, cd=9.9, shots=0,
+                       jitter=0.0, bsp=1.0, value=600, shape=TENDER,
+                       eng=TENDER_ENG, keep=0.0, col="foe5", turn=2.6,
+                       lead=0.0),
     }
     BOSSES = ("marauder", "dread")
     ESCAPE = 12.0          # tender: seconds from arrival to its jump, wave 1
@@ -65,7 +69,8 @@ class Raider:
         # minimum a full-size dreadnought would be most of the screen.
         self.r = s["r"]
         if world is not None:
-            self.r = min(self.r, world[0] * 0.115, world[1] * 0.20)
+            self.r = min(self.r, world[0] * 0.115 * config.SCALE,
+                          world[1] * 0.20 * config.SCALE)
         self.hp = self.hp0 = s["hp"]
         self.speed = s["speed"] * (0.82 + 0.34 * diff)
         # Wave 1 used to open its volleys 30% further apart than the class's
@@ -126,7 +131,17 @@ class Raider:
     def enraged(self):
         return self.kind == "dread" and self.hp * 2 <= self.hp0
 
-    def update(self, dt, world, ship, bullets, sun=None):
+    # Rocks. Clearance is part size and part speed: a multiple of the two
+    # radii, so it follows SCALE and a dreadnought gets more room than an
+    # interceptor, plus however far this hull travels in ROCK_SEE seconds.
+    # The speed term is what matters - sizes shrink with SCALE but speeds do
+    # not, so a size-only margin leaves a fast ship no room to turn in and it
+    # flies into the rock it was trying to miss.
+    ROCK_CLEAR = 2.1
+    ROCK_SEE = 0.55        # seconds of look-ahead
+    ROCK_PUSH = 3.4
+
+    def update(self, dt, world, ship, bullets, sun=None, rocks=()):
         self.t += dt
         self.flash = max(0.0, self.flash - dt)
         self.arrive = max(0.0, self.arrive - dt)
@@ -179,6 +194,46 @@ class Raider:
                 wx, wy = wx / n, wy / n
                 if self.phase == "flee":
                     want = math.atan2(wy, wx)
+        # And nobody flies into a boulder on purpose either.
+        #
+        # Not a repulsion field: those fail exactly when it matters. Pushed
+        # away from where a rock *is*, a hull meeting one head-on gets a shove
+        # straight backwards, which does not move it off the line at all; and
+        # two rocks on opposite sides cancel to nothing and it sails between
+        # them into both. So aim at where the rock is going to be instead.
+        # For each one, find the moment of closest approach given how the two
+        # are moving, and steer off the line that closest approach sits on -
+        # which comes out sideways when something is coming at you, because
+        # sideways is the way out. Only the most urgent rock is dodged at a
+        # time, so the answer is always a direction rather than an average of
+        # directions that is no direction at all.
+        worst = None
+        for a in rocks:
+            rx, ry = self.toward(self.x, self.y, a.x, a.y, world)
+            rvx, rvy = a.vx - self.vx, a.vy - self.vy
+            rv2 = rvx * rvx + rvy * rvy
+            t = 0.0 if rv2 < 1e-6 else -(rx * rvx + ry * rvy) / rv2
+            t = max(0.0, min(self.ROCK_SEE, t))
+            cx, cy = rx + rvx * t, ry + rvy * t      # gap at that moment
+            miss = math.hypot(cx, cy)
+            need = (a.r + self.r) * self.ROCK_CLEAR
+            if miss < need:
+                urgency = (need - miss) / need
+                if worst is None or urgency > worst[0]:
+                    worst = (urgency, cx, cy, rvx, rvy)
+        if worst is not None:
+            urgency, cx, cy, rvx, rvy = worst
+            n = math.hypot(cx, cy)
+            if n < 1e-3:         # dead centre: no side to prefer, pick one
+                cx, cy = -rvy, rvx
+                n = math.hypot(cx, cy) or 1.0
+            push = self.ROCK_PUSH * urgency
+            wx -= cx / n * push
+            wy -= cy / n * push
+            n = math.hypot(wx, wy) or 1.0
+            wx, wy = wx / n, wy / n
+            if self.phase == "flee":
+                want = math.atan2(wy, wx)
         k = min(1.0, 2.4 * dt)
         self.vx += (wx * speed - self.vx) * k
         self.vy += (wy * speed - self.vy) * k

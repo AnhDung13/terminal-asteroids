@@ -6,6 +6,7 @@ import random
 import time
 
 from .colors import A, ramp
+from . import config
 from .config import TAU
 from .hulls import PLAYER, PLAYER_ENG, PLAYER_TRIM, draw_hull
 
@@ -117,9 +118,14 @@ class Ship:
         self.warp_cd = max(0.0, self.warp_cd - dt)
 
     def hull(self):
-        """Nose, both wingtips and the tail notch, in pixel coords."""
+        """Nose, both wingtips and the tail notch, in pixel coords.
+
+        The nose is also where the gun is: these ride the drawn size, or the
+        rounds would leave from a point the ship no longer reaches.
+        """
         a = self.ang
         def p(off, d):
+            d *= config.SCALE
             return (self.x + d * math.cos(a + off),
                     self.y + d * math.sin(a + off))
         return p(0, 7.5), p(2.5, 5.6), p(-2.5, 5.6), p(math.pi, 2.4)

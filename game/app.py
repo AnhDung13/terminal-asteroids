@@ -71,6 +71,10 @@ def loop(stdscr, game, keys, reader):
                 return
             elif c in (ord("z"), ord("Z")):
                 game.bomb()
+            elif c in (ord("-"), ord("_")):
+                game.zoom(-1)
+            elif c in (ord("="), ord("+")):
+                game.zoom(1)
             elif c in (ord("p"), ord("P")):
                 if game.state == "play":
                     game.state = "paused"
