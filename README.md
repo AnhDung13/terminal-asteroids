@@ -78,13 +78,26 @@ nothing.
 
 **How big everything is** is one dial, and it is yours: press `-` and `=` while
 playing to step it between 50% and 140%, and it is remembered with your high
-score. It multiplies every hull, rock, magazine and mine — both the drawn size
-and the radius you are hit on, so the art never stops matching the hitboxes —
-and it resizes what is already on the field, so you never end up flying a small
-ship among old, large boulders. It deliberately does *not* touch the field, the
-speeds or the standoff distances the fleet keeps, so turning it down gives you
-more room to fly in and a smaller thing to be hit on without slowing the game
-or spreading the fight out.
+score. It multiplies every hull, rock, magazine, mine **and round** — the drawn
+size and the radius you are hit on alike, so the art never stops matching the
+hitboxes — and it resizes what is already on the field, so you never end up
+flying a small ship among old, large boulders.
+
+It deliberately does *not* touch the field, the speeds, the rate of fire or the
+standoff distances the fleet keeps. Those are pace, not size: scaling them would
+make a smaller game a slower one, which is a different thing entirely. What you
+get by turning it down is more room to fly in and a smaller thing to be hit on,
+at exactly the tempo you had before.
+
+Rounds are the part that is easy to get wrong, and this got it wrong first. A
+round is drawn as a streak whose length comes from its speed, and it was tested
+against a bare `+2`; neither followed the dial. At 50% the hulls halved while
+the streak did not, so a round was drawn two and a half times the length of the
+ship that fired it, and its hitbox was half again as large relative to that hull
+as at full size — turning the dial down made the game *less* forgiving, which is
+the opposite of the point. A round has its own radius now, and its streak rides
+the dial; both proportions are identical at every setting, and a test holds them
+there.
 
 In code it lives in [`game/scale.py`](game/scale.py), which is the one place
 that multiplies anything. Every size is written at its natural value where it

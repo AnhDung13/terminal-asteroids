@@ -153,7 +153,9 @@ class Ship:
         for i, (px, py) in enumerate(PLAYER_ENG):
             ex = self.x + px * ca - py * sa
             ey = self.y + px * sa + py * ca
-            ln = (3.0 + 5.0 * self.thrust) * random.uniform(0.7, 1.15)
+            # Off the drawn size, not a fixed length: a plume longer than the
+            # ship it comes out of reads as a bug, not a burn.
+            ln = (0.3 + 0.5 * self.thrust) * r * random.uniform(0.7, 1.15)
             if i:
                 ln *= 0.6
             f.line(ex, ey, ex + bx * ln, ey + by * ln,
@@ -250,6 +252,12 @@ class Bullet:
         self.spent = set() if kind == "pierce" else None
 
     SPEED = 190.0
+    # A round is drawn as a streak rather than a disc, but it still has to
+    # have a size to be hit at. It was a bare +2 at the collision site, which
+    # did not follow the size dial: at 50% the hull halved and the margin did
+    # not, so the round that visibly missed you still killed you. Anything a
+    # round is tested against adds this.
+    R = 2.0
 
     @staticmethod
     def reach(world, speed=None):
@@ -272,8 +280,11 @@ class Bullet:
         att = A(self.col) if self.col else (A("foeshot") if self.hostile
                                             else A("bullet"))
         # A tracer streak from where it was to where it is - a lone dot moving
-        # four pixels a frame is nearly impossible to follow.
-        step = 0.016
+        # four pixels a frame is nearly impossible to follow. Its length comes
+        # from the speed, which the size dial does not touch, so the dial has
+        # to be applied here or a round at 50% would be drawn two and a half
+        # times the length of the ship that fired it.
+        step = 0.016 * config.SCALE
         f.line(self.x - self.vx * step, self.y - self.vy * step,
                self.x, self.y, att, 5)
         if self.dmg > 1:            # a gauss slug reads as a heavier bolt

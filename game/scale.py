@@ -14,7 +14,7 @@ the old size.
 """
 
 from . import config
-from .entities import Asteroid, Pickup, Ship
+from .entities import Asteroid, Bullet, Pickup, Ship
 from .fleet import Raider
 from .sectors import Mine
 
@@ -22,6 +22,7 @@ from .sectors import Mine
 _SHIP_R = Ship.RADIUS
 _SHIP_DRAW = Ship.DRAW_R
 _PICKUP_R = Pickup.R
+_BULLET_R = Bullet.R
 _MINE_R = Mine.R
 _ROCK = dict(Asteroid.SPECS)
 _RAIDER = {k: v["r"] for k, v in Raider.SPECS.items()}
@@ -45,6 +46,7 @@ def apply(value):
     Ship.RADIUS = _SHIP_R * value
     Ship.DRAW_R = _SHIP_DRAW * value
     Pickup.R = _PICKUP_R * value
+    Bullet.R = _BULLET_R * value
     Mine.R = _MINE_R * value
     Asteroid.SPECS = {size: (r * value, speed, points)
                       for size, (r, speed, points) in _ROCK.items()}

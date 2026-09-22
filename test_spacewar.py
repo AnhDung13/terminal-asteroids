@@ -276,6 +276,42 @@ class ScaleTests(unittest.TestCase):
             ast.scale.apply(value)
             self.assertLess(Ship.RADIUS, Ship.DRAW_R)
 
+    def test_a_round_keeps_its_proportions(self):
+        """The dial has to reach the rounds too. Their length comes from the
+        speed and their hitbox used to be a bare constant, so both stayed put
+        while the ships shrank: at 50% a round was drawn two and a half times
+        the length of the ship and its hitbox was half again as big, relative
+        to the hull, as at full size. Smaller has to mean more room, not less.
+        """
+        seen = set()
+        for value in (0.5, 0.7, 1.0, 1.4):
+            ast.scale.apply(value)
+            hull = Ship.DRAW_R
+            hitbox = (Ship.RADIUS + Bullet.R) / hull
+            streak = (Bullet.SPEED * 0.016 * ast.config.SCALE) / hull
+            seen.add((round(hitbox, 6), round(streak, 6)))
+        self.assertEqual(len(seen), 1, "proportions drift with the dial")
+
+    def test_the_bullet_radius_rides_the_dial(self):
+        for value in (0.5, 1.0, 1.4):
+            ast.scale.apply(value)
+            self.assertAlmostEqual(Bullet.R, 2.0 * value)
+
+    def test_a_round_that_missed_does_not_kill_you_at_any_size(self):
+        """A shot parked just outside hull + round misses, whatever the dial
+        says - the failure this had was that the margin did not shrink."""
+        for value in (0.5, 1.0, 1.4):
+            ast.scale.apply(value)
+            g = hold(game())
+            s = g.ship
+            gap = Ship.RADIUS + Bullet.R
+            g.bullets = [Bullet(s.x + gap * 1.15, s.y, 0, 0, 5, hostile=True)]
+            g.collisions()
+            self.assertIsNotNone(g.ship, "killed at %.2f" % value)
+            g.bullets = [Bullet(s.x + gap * 0.5, s.y, 0, 0, 5, hostile=True)]
+            g.collisions()
+            self.assertIsNone(g.ship, "not hit at %.2f" % value)
+
     def test_speeds_are_not_scaled(self):
         """Scaling is about room, not pace: it must not slow the game."""
         ast.scale.apply(0.5)

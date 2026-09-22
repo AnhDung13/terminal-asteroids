@@ -912,7 +912,8 @@ class Game(GameRender):
             for b in list(self.bullets):
                 if b.hostile:
                     continue
-                if self.wrap_dist(b.x, b.y, m.x, m.y) < Mine.R + 1.5:
+                if (self.wrap_dist(b.x, b.y, m.x, m.y) <
+                        Mine.R + Bullet.R * 0.75):
                     self.bullets.remove(b)
                     if not b.spent:
                         self.hits += 1
@@ -962,7 +963,8 @@ class Game(GameRender):
                     self.rage_check(foe)
                 return
         for b in list(self.bullets):
-            if b.hostile and self.wrap_dist(s.x, s.y, b.x, b.y) < Ship.RADIUS + 2:
+            if (b.hostile and self.wrap_dist(s.x, s.y, b.x, b.y) <
+                    Ship.RADIUS + Bullet.R):
                 self.bullets.remove(b)
                 if s.invuln <= 0:
                     self.hurt()
