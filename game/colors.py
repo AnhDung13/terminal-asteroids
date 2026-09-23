@@ -2,6 +2,13 @@
 
 Two tiers - a 256-colour set when the terminal has it, an 8-colour fallback
 when it does not - behind one lookup, so nothing downstream has to ask.
+
+A curses colour is half of a pair, never a value on its own, which is why
+backgrounds are kept here as bare colour numbers (`BGS`) and only married to
+a foreground at the last moment, in `on()`. The game used to leave every
+background at the terminal's default and so threw away half of what the
+palette could say; the haze, the corona and the light an explosion throws
+are all that half, finally spent.
 """
 
 import curses
@@ -9,7 +16,9 @@ import curses
 
 PAL = {}      # name -> curses attribute
 RAMPS = {}    # name -> list of attributes, dark end last
+BGS = {}      # name -> list of background colour NUMBERS, thick end first
 _pairs = {}
+_over = {}    # (attr, background colour) -> attr carrying that background
 _next_pair = [1]
 _BG = [-1]
 
@@ -25,6 +34,55 @@ def ramp(name, t):
         return 0
     i = int(t * (len(r) - 1) + 0.5)
     return r[max(0, min(len(r) - 1, i))]
+
+
+def bgramp(name, t):
+    """Sample a background wash; t=0 is the thickest end, t=1 past the edge.
+
+    Returns a colour number, not an attribute - which pair it ends up in
+    depends on what gets drawn over it, and that is not known until blit.
+    0 means no wash at all, so a glow can fall off to nothing by running `t`
+    one step past the end of its ramp rather than by special-casing the edge.
+    """
+    r = BGS.get(name)
+    if not r:
+        return 0
+    i = int(t * len(r) + 0.5)
+    return r[i] if 0 <= i < len(r) else 0
+
+
+def on(attr, bg):
+    """The same foreground, laid over a background colour.
+
+    Pairs are allocated lazily and cached, because which foregrounds end up
+    over which wash is not knowable in advance - a ship crossing a nebula
+    decides it. If the terminal runs out of pairs, the foreground alone is a
+    perfectly good answer, so this degrades to what the game drew before.
+    """
+    if not bg:
+        return attr
+    key = (attr, bg)
+    got = _over.get(key)
+    if got is not None:
+        return got
+    fg = -1
+    n = curses.pair_number(attr)
+    if n:
+        try:
+            fg = curses.pair_content(n)[0]
+        except curses.error:
+            fg = -1
+    out = attr
+    i = _next_pair[0]
+    if i < min(curses.COLOR_PAIRS, 250):
+        try:
+            curses.init_pair(i, fg, bg)
+            _next_pair[0] = i + 1
+            out = curses.color_pair(i) | (attr & curses.A_BOLD)
+        except curses.error:
+            out = attr
+    _over[key] = out
+    return out
 
 
 def _mk(color, bold=False):
@@ -44,6 +102,8 @@ def _mk(color, bold=False):
 
 
 def init_colors():
+    _over.clear()
+    BGS.clear()
     curses.start_color()
     try:
         curses.use_default_colors()
@@ -84,6 +144,14 @@ def init_colors():
                           _mk(61), _mk(238)]
         RAMPS["neb"] = [_mk(183, True), _mk(177), _mk(140), _mk(97),
                         _mk(60)]
+        RAMPS["smoke"] = [_mk(248), _mk(245), _mk(242), _mk(240), _mk(238),
+                          _mk(236)]
+        # Backgrounds, thickest first. Kept deliberately short and dark:
+        # every foreground that crosses one costs a pair, so a long wash
+        # ramp would eat the table, and a bright one would swallow the text
+        # drawn over it.
+        BGS["neb"] = [53, 17]          # nebula haze
+        BGS["glow"] = [88, 52, 236]    # firelight, and a star's corona
     else:
         W, Y, R, C, M, G = (curses.COLOR_WHITE, curses.COLOR_YELLOW,
                             curses.COLOR_RED, curses.COLOR_CYAN,
@@ -116,3 +184,6 @@ def init_colors():
         RAMPS["shock"] = [_mk(W, True), _mk(C, True), _mk(C),
                           _mk(C) | curses.A_DIM]
         RAMPS["neb"] = [_mk(M, True), _mk(M), _mk(M) | curses.A_DIM]
+        RAMPS["smoke"] = [_mk(W), _mk(W) | curses.A_DIM]
+        # No BGS here on purpose: with eight colours a background is a wall
+        # rather than a wash, and it would take the text down with it.

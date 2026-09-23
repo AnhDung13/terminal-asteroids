@@ -10,6 +10,7 @@ import time
 
 from . import config
 from .colors import A, ramp
+from .config import TAU
 from .entities import WEAPONS
 from .screen import Field
 from .sectors import SECTORS
@@ -48,6 +49,9 @@ class GameRender:
                                           o.x, o.y) > vis
 
         neb = "neb" if self.cur == "nebula" else "star"
+        if self.haze is not None:
+            self.haze.draw(f, self.clock)
+        self.draw_sector_ambience(f)
         for st in self.stars:
             st.draw(f, neb)
         if self.sun is not None:
@@ -60,6 +64,8 @@ class GameRender:
             p.draw(f)
         for s in self.shocks:
             s.draw(f)
+        for fb in self.fires:
+            fb.draw(f)
         for d in self.debris:
             d.draw(f)
         for a in self.asteroids:
@@ -84,8 +90,16 @@ class GameRender:
                 f.dot(b.x, b.y, A("frame"), 3)
             else:
                 b.draw(f)
-        if fog:            # the edge of what you can see
-            f.arc(self.ship.x, self.ship.y, vis, A("frame"), 0, step=7.0)
+        if fog:
+            # The edge of what you can see, as a band rather than as a line:
+            # the haze thickens until it closes over. Each ring is started at
+            # a different angle so they do not comb into radial spokes.
+            for i in range(5):
+                k = i / 4.0
+                a0 = i * 1.13
+                f.arc(self.ship.x, self.ship.y, vis * (0.86 + 0.18 * k),
+                      ramp("neb", 0.45 + 0.5 * k), 0,
+                      step=2.6 + 11.0 * k * k, a0=a0, a1=a0 + TAU)
         if self.ship:
             self.ship.draw(f)
         for p in self.pops:
@@ -109,6 +123,19 @@ class GameRender:
             y0 = sc.h * 2 // 3 - len(self.card) // 2
             y0 = max(2, min(y0, sc.h - len(self.card) - 4))
             self.panel(sc, self.card, y0=y0)
+
+    def draw_sector_ambience(self, f):
+        """Low-contrast motion that gives the debris sector its own sky."""
+        if self.cur != "debris":
+            return
+        w, h = self.world
+        dust = ramp("smoke", 0.35)
+        for i in range(18):
+            speed = 5.0 + (i % 4) * 2.0
+            x = (i * 97.0 + self.clock * speed) % w
+            y = (i * 53.0 + math.sin(self.clock * 0.28 + i * 1.7) * 8.0) % h
+            length = 1.5 + (i % 3) * 0.8
+            f.line(x, y, x - length, y + 0.35, dust, 0)
 
     # -- chrome -----------------------------------------------------------
     def draw_frame(self, sc):

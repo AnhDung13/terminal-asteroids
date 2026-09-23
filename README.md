@@ -302,11 +302,18 @@ you. Beyond that, each class has one habit of its own:
 - **Marauder** — circles for a few seconds, then breaks orbit and runs
   straight at you at more than twice its cruise speed, peels off, and circles
   again. The charge is telegraphed by the turn toward you; sidestep it, and it
-  is exposed for a second on the way back out.
-- **Dreadnought** — once it is down to half its hull, it goes on throwing its
-  seven-round volleys and adds a full ring of sixteen slower rounds every few
-  seconds, from all round the hull. The ring rotates and the gaps are wide:
-  it is dodged by moving, not by luck. A bomb, if you have one, is for this.
+  is exposed for a second on the way back out. Its two-round volleys come
+  in three shapes, drawn in a shuffled cycle: a _fan_, a _burst_ of rounds
+  one after another each re-aimed as it leaves, and a _sweep_ drawn across
+  you from one side to the other.
+- **Dreadnought** — three-round volleys in four shapes: the _fan_; a _lance_
+  of a fast parallel pair from the flanking pods and one down the spine; a
+  slow _spiral_ wheeling
+  round the hull; and a _wall_ of slow rounds abreast, to be flown round
+  rather than through. Once it is down to half its hull it adds a full ring
+  of twelve slower rounds every few seconds, from all round the hull. The
+  ring rotates and the gaps are wide: it is dodged by moving, not by luck. A
+  bomb, if you have one, is for this.
 - **Tender** — the fleet's supply hauler, riding with every third ordinary
   wave (3, 6, 9, 12…) and arriving mid-pack, never first. It has no gun. It
   runs straight away from you, weaving, while its jump drive spools: a ring
@@ -317,6 +324,16 @@ you. Beyond that, each class has one habit of its own:
   with one more gunship in its escort. It is slower than you, but it is never
   where the fight is, so the whole time you are chasing it the fight is
   behind you.
+
+**Boxed in.** The line ships wrap round the field like everything else. The
+two bosses and the tender do not: they are held a hull's width inside the
+edge, and for them the field has no seam — they steer and shoot at you the
+long way round, never through the edge. Your rounds die at the edge, so a
+ship living across it was a ship you could not hit; a dreadnought parked
+half over the seam, or a tender fleeing through it, was exactly that. Corner
+a tender now and it stays cornered. Both bosses also keep a shorter standoff
+than they did, one that fits inside the field, so they circle you rather
+than backing onto the far edge.
 
 **The tell.** Any gunner that leads its target — the gunship, and the
 dreadnought's spinal battery — shows where the volley is going for the last
@@ -332,13 +349,13 @@ the fleet through wave 10 — how many ships, how fast, and how often they fire.
 
 | Wave | Fleet                                     | Rocks | Interceptor speed | Volley gap |
 | ---- | ----------------------------------------- | ----- | ----------------- | ---------- |
-| 1    | 2 interceptor                             | 1     | 52 px/s           | 1.9 s      |
-| 3    | 2 interceptor                             | 1     | 54 px/s           | 1.8 s      |
-| 5    | 3 interceptor, 1 gunship, **Marauder**    | 2     | 58 px/s           | 1.7 s      |
-| 8    | 4 interceptor, 1 gunship                  | 2     | 67 px/s           | 1.5 s      |
-| 10   | 3 interceptor, 2 gunship, **Dreadnought** | 3     | 74 px/s           | 1.2 s      |
-| 15   | 3 interceptor, 1 gunship, **Marauder**    | 3     | 74 px/s           | 1.2 s      |
-| 20   | 3 interceptor, 2 gunship, **Dreadnought** | 3     | 74 px/s           | 1.2 s      |
+| 1    | 2 interceptor                             | 1     | 52 px/s           | 2.3 s      |
+| 3    | 2 interceptor                             | 1     | 54 px/s           | 2.2 s      |
+| 5    | 3 interceptor, 1 gunship, **Marauder**    | 2     | 58 px/s           | 2.1 s      |
+| 8    | 4 interceptor, 1 gunship                  | 2     | 67 px/s           | 1.8 s      |
+| 10   | 3 interceptor, 2 gunship, **Dreadnought** | 3     | 74 px/s           | 1.5 s      |
+| 15   | 3 interceptor, 1 gunship, **Marauder**    | 3     | 74 px/s           | 1.5 s      |
+| 20   | 3 interceptor, 2 gunship, **Dreadnought** | 3     | 74 px/s           | 1.5 s      |
 
 A class fires at its quoted gap from wave 1 and closes to two thirds of it by
 wave 10. Those gaps are per ship, and jittered ±20% on each reload, so what
@@ -411,9 +428,14 @@ still no brakes.
   one outline and a spine on purpose: at the size a fighter gets drawn there
   is only room for a silhouette, and the nacelles and canopy frames that read
   well on a capital ship fill in solid on a small one
-- Explosions as an expanding shock ring plus a fire-ramp particle burst —
-  white → yellow → orange → red → ember as they cool
-- Death breaks the ship into four tumbling line fragments
+- Explosions in layers: a white flash for the first frames, then a solid
+  fireball — white core, orange ragged rim — that burns hollow from the
+  middle and throws firelight onto the cells around it; an expanding shock
+  ring; streaking sparks and slow embers on the fire ramp, white → yellow →
+  orange → red as they cool; grey smoke that hangs on after the fire is out
+- Every kill breaks the hull along its own lines: pieces of the silhouette
+  you were shooting at tumble off in the ship's colour, then cool to grey.
+  Your own death does the same with the chevron's four sides
 - Saucers with a domed hull, tapered underside and blinking running lights
 - Three-layer parallax starfield that twinkles and shears against your velocity
 - Bullet motion trails, floating `+50` score pops, screen shake, a scanline
@@ -489,6 +511,16 @@ it is fighting you.
 
 `--mute` turns off the terminal bell, which otherwise rings for a boss down, a
 ship lost, an extra ship and a bomb — and nothing else.
+
+`--sector NAME` opens wave 1 in that sector instead of open space — `nebula`,
+`debris`, `mines` or `star` — with the rest of the tour following from wave
+11 as usual, minus the one you started in. It is how you test a sector
+without playing ten waves to reach it. The same thing as a setting is
+`START_SECTOR` in [`game/config.py`](game/config.py).
+
+```sh
+python3 spacewar.py --sector nebula
+```
 
 ### A note on holding keys
 

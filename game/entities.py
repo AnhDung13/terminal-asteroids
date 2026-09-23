@@ -37,6 +37,7 @@ class Ship:
         self.ix = self.iy = 0.0      # smoothed stick position
         self.thrust = 0.0            # 0..1 visual throttle
         self.invuln = 2.2
+        self.hit_flash = 0.0
         self.warp_cd = 0.0
         self.shield = False          # salvaged: eats one hit, then gone
 
@@ -80,6 +81,7 @@ class Ship:
         self.y = (self.y + self.vy * dt) % world[1]
         self.ang %= TAU
         self.invuln = max(0.0, self.invuln - dt)
+        self.hit_flash = max(0.0, self.hit_flash - dt)
         self.warp_cd = max(0.0, self.warp_cd - dt)
 
     # -- classic: rotate, then burn ---------------------------------------
@@ -115,6 +117,7 @@ class Ship:
         self.y = (self.y + self.vy * dt) % world[1]
         self.ang %= TAU
         self.invuln = max(0.0, self.invuln - dt)
+        self.hit_flash = max(0.0, self.hit_flash - dt)
         self.warp_cd = max(0.0, self.warp_cd - dt)
 
     def hull(self):
@@ -133,12 +136,14 @@ class Ship:
     DRAW_R = 10.0          # drawn size; RADIUS above stays the hit radius
 
     def draw(self, f):
-        if self.invuln > 0 and int(self.invuln * 9) % 2 == 0:
+        if (self.hit_flash <= 0 and self.invuln > 0 and
+                int(self.invuln * 9) % 2 == 0):
             return
         r = self.DRAW_R
-        draw_hull(f, self.x, self.y, self.ang, r, PLAYER, A("ship"), 6)
+        hull_attr = A("flash") if self.hit_flash > 0 else A("ship")
+        draw_hull(f, self.x, self.y, self.ang, r, PLAYER, hull_attr, 6)
         draw_hull(f, self.x, self.y, self.ang, r, PLAYER_TRIM,
-                  A("ship_dim"), 6)
+                  A("flash") if self.hit_flash > 0 else A("ship_dim"), 6)
         if self.shield:
             # A slow-breathing ring, drawn sparse so the hull inside it
             # stays legible.
@@ -368,10 +373,14 @@ class Pickup:
 
 
 class Particle:
-    def __init__(self, x, y, vx, vy, life, drag=0.9):
+    """A spark, or - on the `smoke` ramp, with a long life and heavy drag -
+    what is still hanging there once the spark has gone out."""
+
+    def __init__(self, x, y, vx, vy, life, drag=0.9, name="fire"):
         self.x, self.y, self.vx, self.vy = x, y, vx, vy
         self.life = self.life0 = life
         self.drag = drag
+        self.name = name
 
     def update(self, dt, world):
         self.x = (self.x + self.vx * dt) % world[0]
@@ -382,7 +391,69 @@ class Particle:
         self.life -= dt
 
     def draw(self, f):
-        f.dot(self.x, self.y, ramp("fire", 1.0 - self.life / self.life0), 1)
+        t = 1.0 - self.life / self.life0
+        if self.name == "smoke":
+            # Smoke is what is left once the fire has gone. For its first
+            # moments it is still inside the fireball, and drawing it there
+            # would put grey in the middle of the heat.
+            if self.life0 - self.life < 0.22:
+                return
+            f.dot(self.x, self.y, ramp("smoke", t), 1)
+            return
+        sp = math.hypot(self.vx, self.vy)
+        if sp > 30.0 and t < 0.6:
+            # A fast spark is a streak, not a point: it is drawn back along
+            # its own path. One colour for the whole streak - a cell is one
+            # colour, and a cooler tail only made the burst read cooler.
+            ln = min(4.0, sp * 0.03)
+            f.line(self.x - self.vx / sp * ln, self.y - self.vy / sp * ln,
+                   self.x, self.y, ramp("fire", t), 1)
+        elif t > 0.65 and random.random() < 0.35:
+            return                     # an ember flickers as it dies
+        f.dot(self.x, self.y, ramp("fire", t), 1)
+
+
+class Fireball:
+    """The heat at the centre of an explosion.
+
+    The shock ring is the punch and the sparks are the shrapnel; this is the
+    part that is actually on fire. The first few frames are a flash - white,
+    and half again as big as the fire that follows. Then a solid disc opens
+    fast to full size, white at the core and orange at a ragged rim, and
+    burns out from the middle: a hollow opens, the shell walks down the fire
+    ramp, and the rim frays as it goes. It also throws light: the cells
+    around it take a background wash, so for a moment the explosion lights
+    the space it happens in.
+    """
+
+    FLASH = 0.07          # seconds of white before the fire shows
+
+    def __init__(self, x, y, r, life=0.3):
+        self.x, self.y = x, y
+        self.r = r
+        self.life = self.life0 = life
+
+    def update(self, dt, world):
+        self.life -= dt
+
+    def draw(self, f):
+        t = 1.0 - self.life / self.life0
+        age = self.life0 - self.life
+        if age < self.FLASH:
+            k = age / self.FLASH
+            f.disc(self.x, self.y, self.r * (1.7 - 0.5 * k),
+                   ramp("fire", 0.0), 5, fuzz=0.5)
+            f.glow(self.x, self.y, self.r * 2.2, "glow", 3)
+            return
+        r = self.r * (1.0 - (1.0 - min(1.0, t / 0.4)) ** 2)   # ease out
+        if r < 1.0:
+            return
+        hollow = max(0.0, (t - 0.45) / 0.55)
+        heat = 0.8 * t
+        f.disc(self.x, self.y, r,
+               lambda k: ramp("fire", min(1.0, heat + 0.45 * k * k)),
+               5, r_in=r * hollow ** 1.4 * 0.92, fuzz=0.2 + 0.55 * t)
+        f.glow(self.x, self.y, r * 1.5 * (1.0 - hollow), "glow", 2)
 
 
 class Shock:
@@ -401,18 +472,23 @@ class Shock:
         t = 1.0 - self.life / self.life0
         r = self.r0 + (self.r1 - self.r0) * (1.0 - (1.0 - t) ** 2)
         f.arc(self.x, self.y, r, ramp(self.name, t), 2,
-              step=1.0 + 1.6 * t)
+              step=0.8 + 1.8 * t)
 
 
 class Debris:
-    """A tumbling line fragment - the ship coming apart."""
+    """A tumbling line fragment - the ship coming apart.
 
-    def __init__(self, x, y, vx, vy, length, life):
+    Given `attr`, it is a piece of hull: it flashes white as it is torn off,
+    keeps its ship's colour while it is hot, and cools to grey. Without one
+    it is the older, anonymous shard on the shock ramp."""
+
+    def __init__(self, x, y, vx, vy, length, life, ang=None, attr=None):
         self.x, self.y, self.vx, self.vy = x, y, vx, vy
         self.len = length
-        self.ang = random.uniform(0, TAU)
+        self.ang = random.uniform(0, TAU) if ang is None else ang
         self.spin = random.uniform(-4.0, 4.0)
         self.life = self.life0 = life
+        self.attr = attr
 
     def update(self, dt, world):
         self.x = (self.x + self.vx * dt) % world[0]
@@ -424,8 +500,15 @@ class Debris:
         t = 1.0 - self.life / self.life0
         dx = self.len * 0.5 * math.cos(self.ang)
         dy = self.len * 0.5 * math.sin(self.ang)
-        f.line(self.x - dx, self.y - dy, self.x + dx, self.y + dy,
-               ramp("shock", 0.15 + 0.85 * t), 4)
+        if self.attr is None:
+            att = ramp("shock", 0.15 + 0.85 * t)
+        elif t < 0.08:
+            att = A("flash")
+        elif t < 0.35:
+            att = self.attr
+        else:
+            att = ramp("smoke", (t - 0.35) / 0.65)
+        f.line(self.x - dx, self.y - dy, self.x + dx, self.y + dy, att, 4)
 
 
 class Pop:
@@ -467,3 +550,11 @@ class Star:
         tw = 0.5 + 0.5 * math.sin(self.ph)
         f.dot(self.x, self.y,
               ramp(name, 0.25 + 0.7 * self.depth - 0.22 * tw), 0)
+        # Close stars occasionally catch the eye as a tiny four point flare.
+        # Restrict it to the brightest part of the twinkle so it stays rare.
+        if self.depth < 0.22 and tw > 0.96:
+            flare = A("flash")
+            f.dot(self.x - 1, self.y, flare, 1)
+            f.dot(self.x + 1, self.y, flare, 1)
+            f.dot(self.x, self.y - 1, flare, 1)
+            f.dot(self.x, self.y + 1, flare, 1)

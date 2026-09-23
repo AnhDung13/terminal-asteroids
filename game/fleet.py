@@ -23,6 +23,12 @@ class Raider:
     peels away. A dreadnought, once it is down to half its hull, throws a full
     ring of fire every few seconds on top of its volleys.
 
+    A volley is small - one, two, two, three rounds up the ladder, never a
+    step of more than one. What makes a boss dangerous is not the count but
+    the shape: each trigger pull draws the next of several patterns, so the
+    dodge that worked last time is not the dodge for this one. The patterns
+    are listed in PATTERNS and described where they are built.
+
     The fifth class does none of that. A tender carries the fleet's stores:
     it has no gun, it runs from you, and it spools a jump drive as it goes.
     Catch it and it always gives up salvage; let it jump and the next wave
@@ -32,26 +38,33 @@ class Raider:
     volley will land for a moment before it fires - a faint mark at the aim
     point - so the rule "change course after it shoots" can be learned by
     watching rather than by dying.
+
+    The line ships wrap like everything else. The bosses and the tender do
+    not: they are boxed a hull's width inside the field, and for them the
+    field has no seam - they steer and shoot at you the long way round, not
+    through the edge. Rounds die at the edge, so a ship that lives across it
+    is a ship you cannot hit; a capital ship parked half over the seam, or a
+    tender fleeing through it, was exactly that.
     """
 
     # lead: how much of your motion the gunner allows for - 0 fires at where
     # you are, 1 is a clean intercept on a ship that holds its course.
     SPECS = {
-        "scout": dict(r=8.5, hp=1, speed=64.0, cd=1.9, shots=1,
+        "scout": dict(r=8.5, hp=1, speed=64.0, cd=2.3, shots=1,
                       jitter=0.26, bsp=78.0, value=150, shape=SCOUT,
                       eng=SCOUT_ENG, keep=46.0, col="foe1", turn=5.0,
                       lead=0.0),
-        "gunship": dict(r=12.0, hp=2, speed=46.0, cd=1.7, shots=2,
+        "gunship": dict(r=12.0, hp=2, speed=46.0, cd=2.05, shots=2,
                         jitter=0.16, bsp=88.0, value=400, shape=GUNSHIP,
                         eng=GUNSHIP_ENG, keep=86.0, col="foe2", turn=3.4,
                         lead=1.0),
-        "marauder": dict(r=15.0, hp=11, speed=32.0, cd=1.35, shots=4,
+        "marauder": dict(r=15.0, hp=11, speed=32.0, cd=1.6, shots=2,
                          jitter=0.13, bsp=80.0, value=2500, shape=MARAUDER,
-                         eng=MARAUDER_ENG, keep=104.0, col="foe3",
+                         eng=MARAUDER_ENG, keep=88.0, col="foe3",
                          turn=2.4, lead=0.0),
-        "dread": dict(r=24.0, hp=28, speed=23.0, cd=1.15, shots=7,
+        "dread": dict(r=24.0, hp=28, speed=23.0, cd=1.4, shots=3,
                       jitter=0.10, bsp=74.0, value=12000, shape=DREADNOUGHT,
-                      eng=DREADNOUGHT_ENG, keep=134.0, col="foe4",
+                      eng=DREADNOUGHT_ENG, keep=98.0, col="foe4",
                       turn=1.7, lead=0.6),
         "tender": dict(r=11.0, hp=3, speed=46.0, cd=9.9, shots=0,
                        jitter=0.0, bsp=1.0, value=600, shape=TENDER,
@@ -59,8 +72,25 @@ class Raider:
                        lead=0.0),
     }
     BOSSES = ("marauder", "dread")
+    BOXED = ("marauder", "dread", "tender")   # never cross the field's edge
+    BOX = 1.15                                 # margin, in hull radii...
+    BOX_PAD = 3.0                              # ...plus this many units
+    # A boss's repertoire, drawn in a shuffled cycle, never the same twice
+    # running. Each name is a p_<name> method below.
+    PATTERNS = {"marauder": ("fan", "burst", "sweep"),
+                "dread": ("fan", "lance", "spiral", "wall")}
     ESCAPE = 12.0          # tender: seconds from arrival to its jump, wave 1
     AIM_WARN = 0.3         # a leading gunner marks its aim point this long
+
+    # Battle damage. A capital ship is on the field long enough to be worth
+    # reading, and a hull bar on the frame line is the wrong place to read
+    # it from - you are looking at the ship. So it comes apart where you can
+    # see it: past SCAR_FROM of its hull, plating goes dark one piece at a
+    # time, and past VENT_FROM the holes start venting. A dreadnought's rage
+    # begins at exactly half hull, so the first plates go dark on the same
+    # hit that turns it nasty.
+    SCAR_FROM = 0.5
+    VENT_FROM = 0.75
 
     def __init__(self, kind, x, y, diff, world=None):
         s = self.SPECS[kind]
@@ -87,6 +117,7 @@ class Raider:
         self.col = s["col"]
         self.turn = s["turn"]
         self.boss = kind in self.BOSSES
+        self.boxed = kind in self.BOXED
         self.x, self.y = x, y
         self.vx = self.vy = 0.0
         self.ang = random.uniform(0, TAU)
@@ -100,7 +131,15 @@ class Raider:
         self.ring_cd = 1.5         # dread: time to the next ring of fire
         self.raged = False         # dread: has the rage been announced
         self.mark = None           # where the next volley is aimed, if shown
+        self.salvo = []            # rounds scheduled but not yet fired
+        self.deck, self.last = [], None    # boss: patterns still to draw
         self.escape = None         # tender: seconds until it jumps out
+        # Which pieces of plating go, and in what order. Fixed at build so a
+        # ship does not reshuffle its own wreckage every frame; the hull
+        # outline is index 0 and is never one of them, because a silhouette
+        # you cannot make out is not damage, it is a bug.
+        self.scars = list(range(1, len(self.shape)))
+        random.shuffle(self.scars)
         if kind == "tender":
             self.phase = "flee"
             self.escape = self.escape0 = self.ESCAPE * (1.0 - 0.25 * diff)
@@ -114,7 +153,7 @@ class Raider:
     CHARGE, RETREAT = 1.5, 1.1                  # seconds in each
     CHARGE_SPEED, RETREAT_SPEED = 2.3, 1.6      # times cruise
     # Dreadnought, under half hull: a ring of fire every so often.
-    RING_EVERY, RING_SHOTS = 3.2, 16
+    RING_EVERY, RING_SHOTS = 3.8, 12
 
     def _cycle(self, dt):
         self.phase_t -= dt
@@ -148,7 +187,10 @@ class Raider:
         self.mark = None
         speed = self.speed
         if ship is not None:
-            dx, dy = self.toward(self.x, self.y, ship.x, ship.y, world)
+            if self.boxed:     # no seam: the way to you is across the box
+                dx, dy = ship.x - self.x, ship.y - self.y
+            else:
+                dx, dy = self.toward(self.x, self.y, ship.x, ship.y, world)
             d = math.hypot(dx, dy) or 1.0
             ux, uy = dx / d, dy / d
             if self.kind == "marauder":
@@ -234,17 +276,38 @@ class Raider:
             wx, wy = wx / n, wy / n
             if self.phase == "flee":
                 want = math.atan2(wy, wx)
+        if self.boxed:
+            # Bend away from the edge before it arrives, so an orbit that
+            # would have crossed it rounds off instead of scraping along it.
+            m = self.margin()
+            for i, span in enumerate(world):
+                p = self.x if i == 0 else self.y
+                push = 0.0
+                if p < 2 * m:
+                    push = (2 * m - p) / m
+                elif p > span - 2 * m:
+                    push = -(p - (span - 2 * m)) / m
+                if i == 0:
+                    wx += push * 1.5
+                else:
+                    wy += push * 1.5
+            n = math.hypot(wx, wy) or 1.0
+            wx, wy = wx / n, wy / n
         k = min(1.0, 2.4 * dt)
         self.vx += (wx * speed - self.vx) * k
         self.vy += (wy * speed - self.vy) * k
         self.x = (self.x + self.vx * dt) % world[0]
         self.y = (self.y + self.vy * dt) % world[1]
+        if self.boxed:
+            self.box(world)
         da = (want - self.ang + math.pi) % TAU - math.pi
         self.ang = (self.ang + da * min(1.0, self.turn * dt)) % TAU
 
         self.cd -= dt
         if ship is None or self.arrive > 0 or not self.shots:
+            self.salvo = []        # nothing to aim at: the pattern is off
             return True
+        self._salvo(dt, bullets, world, dx, dy, d, ship)
         if self.lead > 0 and self.cd <= self.AIM_WARN:
             # The tell: where the rounds are going, shown before they go.
             t = d / self.bsp * self.lead
@@ -260,6 +323,22 @@ class Raider:
                 self.ring(bullets, world)
         return True
 
+    def margin(self):
+        return self.r * self.BOX + self.BOX_PAD
+
+    def box(self, world):
+        """Hold a boxed ship inside the field, hull and all. Whatever speed
+        it had into the wall is gone; along it is kept, so it slides."""
+        m = self.margin()
+        if self.x < m:
+            self.x, self.vx = m, max(0.0, self.vx)
+        elif self.x > world[0] - m:
+            self.x, self.vx = world[0] - m, min(0.0, self.vx)
+        if self.y < m:
+            self.y, self.vy = m, max(0.0, self.vy)
+        elif self.y > world[1] - m:
+            self.y, self.vy = world[1] - m, min(0.0, self.vy)
+
     def aim(self, dx, dy, d, ship):
         """The bearing for a volley: at the ship, or ahead of it by `lead`."""
         if self.lead <= 0:
@@ -268,15 +347,106 @@ class Raider:
         return math.atan2(dy + ship.vy * t, dx + ship.vx * t)
 
     def volley(self, bullets, world, base):
-        n = self.shots
+        """One trigger pull. A line ship fires its fan; a boss draws the next
+        pattern from its deck, and most of those play out over the following
+        fraction of a second through the salvo queue."""
+        if not self.boss:
+            self.fan(bullets, world, base)
+            return
+        getattr(self, "p_" + self.next_pattern())(bullets, world, base)
+
+    def next_pattern(self):
+        if not self.deck:
+            self.deck = list(self.PATTERNS[self.kind])
+            random.shuffle(self.deck)
+            if len(self.deck) > 1 and self.deck[-1] == self.last:
+                self.deck.append(self.deck.pop(0))
+        self.last = self.deck.pop()
+        return self.last
+
+    def muzzle(self, a, side=0.0):
+        """Where a round leaves the hull: the nose, or `side` radii out along
+        the flank, for a pattern that fires from the pods."""
+        m = self.r * (1.05 if self.boss else 0.9)
+        return (self.x + m * math.cos(self.ang) - side * self.r * math.sin(a),
+                self.y + m * math.sin(self.ang) + side * self.r * math.cos(a))
+
+    def fan(self, bullets, world, base, n=None, spm=1.0):
+        """`shots` rounds spread round the bearing - the line ship's whole
+        vocabulary, and the first word of a boss's."""
+        n = self.shots if n is None else n
         step = 0.17 if not self.boss else 0.15
-        muzzle = self.r * (1.05 if self.boss else 0.9)
-        ox = self.x + muzzle * math.cos(self.ang)
-        oy = self.y + muzzle * math.sin(self.ang)
+        ox, oy = self.muzzle(base)
         for i in range(n):
             a = base + (i - (n - 1) * 0.5) * step
             a += random.uniform(-self.jitter, self.jitter)
-            self.shoot(bullets, world, ox, oy, a, self.bsp)
+            self.shoot(bullets, world, ox, oy, a, self.bsp * spm)
+
+    def later(self, t, off, rel=True, side=0.0, spm=1.0):
+        """Queue a round: `t` seconds from now, at angle `off` - relative to
+        a fresh aim at that moment if `rel`, absolute otherwise."""
+        self.salvo.append((t, rel, off, side, spm))
+
+    def _salvo(self, dt, bullets, world, dx, dy, d, ship):
+        if not self.salvo:
+            return
+        keep = []
+        for t, rel, off, side, spm in self.salvo:
+            t -= dt
+            if t > 0:
+                keep.append((t, rel, off, side, spm))
+                continue
+            a = (self.aim(dx, dy, d, ship) + off) if rel else off
+            ox, oy = self.muzzle(a, side)
+            self.shoot(bullets, world, ox, oy, a, self.bsp * spm)
+        self.salvo = keep
+
+    # -- boss patterns ----------------------------------------------------
+    # Every pattern spends exactly `shots` rounds, the same as the plain
+    # fan; they differ in shape and timing, which is what you actually dodge.
+
+    def p_fan(self, bullets, world, base):
+        self.fan(bullets, world, base)
+
+    def p_burst(self, bullets, world, base):
+        """Marauder: the same rounds one after another, each re-aimed as it
+        leaves - a stream that follows you, so you sidestep it, not wait."""
+        for i in range(self.shots):
+            self.later(i * 0.11, random.uniform(-0.04, 0.04), spm=1.1)
+
+    def p_sweep(self, bullets, world, base):
+        """Marauder: a curtain drawn across you from one side to the other,
+        in the direction it is orbiting. You run out of it, not through."""
+        n = self.shots
+        arc = 0.42 * self.orbit
+        for i in range(n):
+            self.later(i * 0.1, base - arc + 2 * arc * i / (n - 1), rel=False,
+                       spm=0.95)
+
+    def p_lance(self, bullets, world, base):
+        """Dreadnought: a pair of fast parallel rounds from the flanking
+        pods, led like the fan, then one down the spine. Straight and quick:
+        the gap between the pair is a place to be."""
+        for i in range(self.shots // 2):
+            for side in (-0.45, 0.45):
+                self.later(i * 0.16, 0.0, side=side, spm=1.4)
+        if self.shots % 2:
+            self.later((self.shots // 2) * 0.16, 0.0, spm=1.4)
+
+    def p_spiral(self, bullets, world, base):
+        """Dreadnought: slow rounds wheeling round the hull, the first at
+        you and the rest turning away - a pinwheel to step between."""
+        n = self.shots
+        for i in range(n):
+            self.later(i * 0.12, base + self.orbit * i * TAU / n, rel=False,
+                       spm=0.8)
+
+    def p_wall(self, bullets, world, base):
+        """Dreadnought: slow rounds abreast across the bearing, all moving
+        together - a wall too wide to jump, meant to be flown round."""
+        n = self.shots
+        for i in range(n):
+            self.later(0.0, 0.0, side=(i - (n - 1) * 0.5) * 0.55, spm=0.65)
 
     def ring(self, bullets, world):
         """A full circle of slower rounds, from all round the hull. It is
@@ -311,7 +481,19 @@ class Raider:
         if self.arrive > 0 and int(self.arrive * 14) % 2 == 0:
             return
         att = A("flash") if self.flash > 0 else A(self.col)
-        draw_hull(f, self.x, self.y, self.ang, self.r, self.shape, att, 4)
+        hurt = 1.0 - max(0.0, self.hp) / self.hp0
+        dark = 0
+        if self.boss and hurt > self.SCAR_FROM and self.flash <= 0:
+            k = (hurt - self.SCAR_FROM) / (1.0 - self.SCAR_FROM)
+            dark = min(len(self.scars), int(k * len(self.scars) + 0.5))
+        if dark:
+            # Only a damaged capital ship pays for the per-piece pass.
+            gone = set(self.scars[:dark])
+            for i, poly in enumerate(self.shape):
+                draw_hull(f, self.x, self.y, self.ang, self.r, (poly,),
+                          A("dim") if i in gone else att, 4)
+        else:
+            draw_hull(f, self.x, self.y, self.ang, self.r, self.shape, att, 4)
         spool = 0.0
         if self.escape is not None:
             # The jump drive spooling up: a ring that fills in as the charge
@@ -330,6 +512,24 @@ class Raider:
             ln = self.r * random.uniform(0.12, 0.30) * (1.0 + 1.5 * spool)
             f.line(ex, ey, ex + bx * ln, ey + by * ln,
                    ramp("fire", random.uniform(0.15, 0.55)), 4)
+        if dark and hurt > self.VENT_FROM:
+            # It vents from the holes it has, not from somewhere decorative:
+            # each plume starts at a corner of a plate that has gone dark.
+            for idx in self.scars[:min(3, dark)]:
+                vx, vy = self.shape[idx][0]
+                ex = self.x + vx * ca - vy * sa
+                ey = self.y + vx * sa + vy * ca
+                # Trailing, and thrown a little wide of the hull - a rupture
+                # blows outward, and then the ship flies out from under it.
+                ox, oy = vx * ca - vy * sa, vx * sa + vy * ca
+                n = math.hypot(ox, oy) or 1.0
+                ln = self.r * random.uniform(0.25, 0.85)
+                gx = bx * 0.75 + ox / n * 0.5
+                gy = by * 0.75 + oy / n * 0.5
+                hot = random.random() < 0.35
+                f.line(ex, ey, ex + gx * ln, ey + gy * ln,
+                       ramp("fire", random.uniform(0.1, 0.4)) if hot else
+                       ramp("smoke", random.uniform(0.0, 0.7)), 4)
         if self.boss:      # a slow sweeping sensor blip along the spine
             ph = 0.5 + 0.5 * math.sin(self.t * 2.2)
             f.dot(self.x + (0.55 * ph + 0.1) * ca,

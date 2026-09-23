@@ -8,12 +8,13 @@ from . import config, scale
 from .colors import A
 from .config import TAU, beep, wrap_delta
 from .entities import (GEAR_ODDS, ITEMS, WEAPON_KINDS, WEAPONS, Asteroid,
-                       Bullet, Debris, Particle, Pickup, Pop, Shock, Ship,
-                       Star)
+                       Bullet, Debris, Fireball, Particle, Pickup, Pop,
+                       Shock, Ship, Star)
 from .fleet import Raider
 from .render import GameRender
 from .screen import PX, PY, Screen
-from .sectors import SECTOR_CYCLE, SECTOR_WAVES, SECTORS, Mine, Sun
+from .sectors import (SECTOR_CYCLE, SECTOR_WAVES, SECTORS, Mine, Nebula,
+                      Sun)
 
 
 class Game(GameRender):
@@ -79,8 +80,8 @@ class Game(GameRender):
 
     def movers(self):
         objs = (self.asteroids + self.bullets + self.particles +
-                self.shocks + self.debris + self.pops + self.foes +
-                self.pickups + self.mines)
+                self.shocks + self.fires + self.debris + self.pops +
+                self.foes + self.pickups + self.mines)
         if self.ship:
             objs.append(self.ship)
         return objs
@@ -126,6 +127,13 @@ class Game(GameRender):
 
     def sector(self, level=None):
         i = self.sector_index(level)
+        start = config.START_SECTOR
+        if start and start != "open":
+            # Testing a sector: open in it, then tour the others as usual.
+            if i == 0:
+                return start
+            rest = [s for s in self.sector_order if s != start]
+            return rest[(i - 1) % len(rest)]
         if i == 0:
             return "open"
         return self.sector_order[(i - 1) % len(self.sector_order)]
@@ -139,6 +147,9 @@ class Game(GameRender):
         self.mines = []
         self.bullets = [b for b in self.bullets if not b.hostile]
         self.sun = Sun(self.world) if name == "star" else None
+        # A fresh seed each jump: two nebulae in one run should not be the
+        # same sky. It sizes itself to the field the first time it draws.
+        self.haze = Nebula() if name == "nebula" else None
         w, h = self.world
         self.shocks.append(Shock(w / 2, h / 2, 2, max(w, h) * 0.7, 0.9))
         beep()
@@ -239,6 +250,7 @@ class Game(GameRender):
         self.bullets = []
         self.particles = []
         self.shocks = []
+        self.fires = []
         self.debris = []
         self.pops = []
         self.foes = []
@@ -256,6 +268,7 @@ class Game(GameRender):
         self.wave_peak = 1
         self.cur = "open"          # the sector you are in
         self.sun = None
+        self.haze = None           # the nebula's cloud, when there is one
         self.sector_order = list(SECTOR_CYCLE)
         random.shuffle(self.sector_order)
         self.clock = 0.0
@@ -375,13 +388,59 @@ class Game(GameRender):
         self.msg, self.msg_t, self.msg_t0 = text, t, t
 
     def burst(self, x, y, n, speed, life, drag=0.9):
+        """Sparks. Most fly; some are embers, slow and longer lit, so the
+        middle of a burst is not empty the moment the fast ones have left."""
         for _ in range(n):
             a = random.uniform(0, TAU)
-            sp = speed * random.uniform(0.2, 1.0)
+            if random.random() < 0.72:
+                sp, lf = speed * random.uniform(0.25, 1.0), life
+            else:
+                sp, lf = speed * random.uniform(0.03, 0.3), life * 1.7
             self.particles.append(Particle(x, y, sp * math.cos(a),
                                            sp * math.sin(a),
-                                           life * random.uniform(0.45, 1.0),
+                                           lf * random.uniform(0.45, 1.0),
                                            drag))
+
+    def wreck(self, foe, n):
+        """The hull comes apart along its own lines.
+
+        `n` pieces of the silhouette the ship was drawn with, at the place
+        and angle they were drawn, in its colour, thrown out from the centre
+        and tumbling. A kill should leave the ship you were shooting at in
+        pieces, not swap it for a generic puff."""
+        ca, sa = math.cos(foe.ang) * foe.r, math.sin(foe.ang) * foe.r
+        segs = []
+        for poly in foe.shape:
+            for (px, py), (qx, qy) in zip(poly, poly[1:]):
+                segs.append((foe.x + px * ca - py * sa,
+                             foe.y + px * sa + py * ca,
+                             foe.x + qx * ca - qy * sa,
+                             foe.y + qx * sa + qy * ca))
+        random.shuffle(segs)
+        for ax, ay, bx, by in segs[:n]:
+            mx, my = (ax + bx) / 2, (ay + by) / 2
+            dx, dy = mx - foe.x, my - foe.y
+            d = math.hypot(dx, dy) or 1.0
+            sp = random.uniform(14, 40)
+            self.debris.append(Debris(
+                mx, my, foe.vx * 0.5 + dx / d * sp, foe.vy * 0.5 + dy / d * sp,
+                math.hypot(bx - ax, by - ay), random.uniform(0.7, 1.2),
+                ang=math.atan2(by - ay, bx - ax), attr=A(foe.col)))
+
+    def smoke(self, x, y, n, speed, life):
+        """What an explosion leaves behind.
+
+        The sparks are gone in half a second and the ring in less; this is
+        the only thing on the field that outlives its own bang, and it is
+        what stops a kill from reading as a blink. It is scenery - nothing
+        collides with it - so it can afford to be slow.
+        """
+        for _ in range(n):
+            a = random.uniform(0, TAU)
+            sp = speed * random.uniform(0.15, 1.0)
+            self.particles.append(Particle(
+                x, y, sp * math.cos(a), sp * math.sin(a),
+                life * random.uniform(0.5, 1.0), 0.955, "smoke"))
 
     def add_score(self, pts, x=None, y=None, attr=None, tag=""):
         if self.state == "title":
@@ -537,6 +596,7 @@ class Game(GameRender):
         if s.shield:
             s.shield = False
             s.invuln = max(s.invuln, 1.0)
+            s.hit_flash = 0.28
             self.shocks.append(Shock(s.x, s.y, 8, 30, 0.4))
             self.burst(s.x, s.y, 16, 70, 0.4)
             self.shake = max(self.shake, 0.15)
@@ -599,13 +659,14 @@ class Game(GameRender):
         self.fire_cd = max(0.0, self.fire_cd - dt)
         for st in self.stars:
             st.update(dt, self.world, self.ship)
-        for group in (self.particles, self.shocks, self.debris, self.pops,
-                      self.pickups):
+        for group in (self.particles, self.shocks, self.fires, self.debris,
+                      self.pops, self.pickups):
             for o in group:
                 o.update(dt, self.world)
         self.pickups = [p for p in self.pickups if p.life > 0]
         self.particles = [p for p in self.particles if p.life > 0]
         self.shocks = [s for s in self.shocks if s.life > 0]
+        self.fires = [b for b in self.fires if b.life > 0]
         self.debris = [d for d in self.debris if d.life > 0]
         self.pops = [p for p in self.pops if p.life > 0]
 
@@ -992,6 +1053,8 @@ class Game(GameRender):
         self.mines.remove(m)
         self.shocks.append(Shock(m.x, m.y, 3, Mine.BLAST * 1.15, 0.5))
         self.shocks.append(Shock(m.x, m.y, 2, 14, 0.25))
+        self.fires.append(Fireball(m.x, m.y, Mine.BLAST * 0.5, 0.3))
+        self.smoke(m.x, m.y, 9, 26, 1.8)
         self.burst(m.x, m.y, 26, 90, 0.5)
         self.shake = max(self.shake, 0.22)
         for foe in list(self.foes):
@@ -1040,6 +1103,8 @@ class Game(GameRender):
         if award:      # rocks ride the multiplier but do not extend the chain
             self.award(a.points, a.x, a.y, A("ast%d" % a.size))
         self.burst(a.x, a.y, 6 + 7 * a.size, 30 + 22 * a.size, 0.5 + 0.1 * a.size)
+        # A rock is rock: it throws dust, not flame.
+        self.smoke(a.x, a.y, 2 + a.size, 15, 1.0)
         self.shocks.append(Shock(a.x, a.y, a.r * 0.5, a.r * 2.4,
                                  0.22 + 0.08 * a.size))
         self.shake = max(self.shake, 0.05 * a.size)
@@ -1062,6 +1127,7 @@ class Game(GameRender):
         """A hot fragment meets a hull: the rock shatters, the hull pays."""
         self.award(a.points, a.x, a.y, A("hot"))
         self.burst(a.x, a.y, 8 + 6 * a.size, 40 + 20 * a.size, 0.45)
+        self.smoke(a.x, a.y, 3 + a.size, 20, 1.1)
         self.shocks.append(Shock(a.x, a.y, a.r * 0.5, a.r * 2.8, 0.3))
         self.shake = max(self.shake, 0.08 + 0.04 * a.size)
         self.asteroids.remove(a)
@@ -1101,20 +1167,25 @@ class Game(GameRender):
                 self.pickups.append(Pickup(foe.x, foe.y, self.loot()))
         n = int(18 + foe.r * 2.4)
         self.burst(foe.x, foe.y, n, 70 + foe.r * 3.0, 0.7 + foe.r * 0.03)
+        self.fires.append(Fireball(foe.x, foe.y, foe.r * 1.35,
+                                   0.3 + foe.r * 0.012))
+        self.smoke(foe.x, foe.y, int(4 + foe.r * 0.45), 24, 1.7)
+        self.wreck(foe, 3 if foe.kind == "scout" else 4)
         self.shocks.append(Shock(foe.x, foe.y, foe.r * 0.4, foe.r * 3.2,
                                  0.4 + foe.r * 0.012))
         self.shake = max(self.shake, 0.14 + foe.r * 0.012)
         if foe.boss:
             self.shocks.append(Shock(foe.x, foe.y, 2, foe.r * 5.5, 0.9))
+            # A capital ship gets a second, slower ring inside the first and
+            # a fireball that is still burning when the sparks have gone.
+            self.shocks.append(Shock(foe.x, foe.y, foe.r * 0.8, foe.r * 2.6,
+                                     0.55))
+            self.fires.append(Fireball(foe.x, foe.y, foe.r * 2.0, 0.8))
+            self.smoke(foe.x, foe.y, 18, 42, 2.6)
             self.flash("%s DOWN" % ("DREADNOUGHT" if foe.kind == "dread"
                                     else "MARAUDER"), 2.0)
             beep()
-            for _ in range(6):     # the hull comes apart
-                a = random.uniform(0, TAU)
-                sp = random.uniform(18, 55)
-                self.debris.append(Debris(
-                    foe.x, foe.y, sp * math.cos(a), sp * math.sin(a),
-                    foe.r * random.uniform(0.5, 1.1), 1.6))
+            self.wreck(foe, 6)     # the rest of the hull comes apart
 
     def kill_ship(self):
         s = self.ship
@@ -1126,8 +1197,12 @@ class Game(GameRender):
                                       s.vx * 0.4 + sp * math.cos(a),
                                       s.vy * 0.4 + sp * math.sin(a),
                                       math.hypot(p[0] - q[0], p[1] - q[1]),
-                                      1.5))
+                                      1.5, ang=math.atan2(q[1] - p[1],
+                                                          q[0] - p[0]),
+                                      attr=A("ship")))
         self.burst(s.x, s.y, 42, 105, 1.1)
+        self.fires.append(Fireball(s.x, s.y, 22.0, 0.55))
+        self.smoke(s.x, s.y, 14, 30, 2.0)
         self.shocks.append(Shock(s.x, s.y, 3, 46, 0.65))
         self.shake = 0.45
         self.ship = None
@@ -1146,4 +1221,3 @@ class Game(GameRender):
         if self.score > self.high:
             self.high = self.score
         self.save_state()
-

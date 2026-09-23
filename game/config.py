@@ -20,6 +20,13 @@ FPS = 60.0
 DESIGN_W, DESIGN_H = 216, 128
 FIT_MIN = 0.5           # below this a hull is too few dots to read
 
+# Which sector wave 1 opens in. None is the game as designed: open space,
+# then a shuffled tour of the others from wave 11. Set a name - "nebula",
+# "debris", "mines" or "star" - to start there instead, with the rest of the
+# cycle following; it is how you test a sector without earning it first.
+# `--sector NAME` on the command line sets it.
+START_SECTOR = None
+
 # A handful of moments ring the terminal bell - a boss down, a ship lost, an
 # extra ship earned - and no more: a beep per shot would be unbearable.
 # --mute silences even those.
