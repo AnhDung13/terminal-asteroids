@@ -135,7 +135,7 @@ class Nebula:
         att = [ramp("neb", 1.0 - 0.5 * i / self.MAX) for i in range(9)]
         wash = [bgramp("neb", 0.6) if i >= self.WASH_FROM else 0
                 for i in range(9)]
-        off = int(t * self.DRIFT * f.z / PX) % cols
+        drift = t * self.DRIFT * f.z / PX
         # Straight at the screen, with the field's own offsets folded in:
         # this is the innermost loop in the renderer, and the wrapping and
         # the unit conversion Field would do are both already done here.
@@ -143,6 +143,11 @@ class Nebula:
         sx, sy = f.cx0, f.cy0
         for cy in range(rows):
             y = cy + sy
+            # Each row steps to its next column at its own moment. Stepped
+            # together, the whole sky moved one cell in one frame - eight
+            # hundred cells rewritten at once, a hitch every two seconds on
+            # a terminal that was otherwise keeping up.
+            off = int(drift + cy / rows) % cols
             for cx, n, bits in self.span[cy]:
                 x = (cx - off) % cols + sx
                 tile(x, y, bits, att[n], 0)
@@ -204,10 +209,17 @@ class Sun:
     survivable and a straight line into it is not. Touch it and you are
     gone. Shots bend round it, so a curved shot past the star is on the
     table; so is the fleet's habit of orbiting you straight through it.
+
+    The pull is sized so that the point of no return - where it outruns
+    your engine - sits just outside the corona, about two and a bit radii
+    out, and that point is drawn: a dashed ring, so the rule "do not cross
+    the ring" can be read off the screen. It used to sit at over four radii
+    with nothing to mark it, and a ship spawned inside it was dead before
+    the player had done anything at all.
     """
 
-    G = 320000.0        # px^3/s^2: 32 px/s^2 of pull at 100 px
-    MAX_PULL = 240.0    # px/s^2, close in
+    G = 70000.0         # px^3/s^2: 7 px/s^2 of pull at 100 px, 44 at 40
+    MAX_PULL = 200.0    # px/s^2, close in
 
     def __init__(self, world):
         self.t = random.uniform(0, TAU)
@@ -234,30 +246,31 @@ class Sun:
     def update(self, dt):
         self.t += dt
 
-    def draw(self, f):
-        # A hard bright core, and a corona of loose arcs turning round it,
-        # standing in a pool of its own light.
+    def horizon(self, accel):
+        """How far out the pull still beats an engine that can make `accel`
+        - the point of no return, in field units."""
+        return math.sqrt(self.G / min(accel, self.MAX_PULL))
+
+    def draw(self, f, edge=None):
+        # A solid core, white at the heart and yellow at a boiling rim, in a
+        # corona of short arcs turning at different rates, standing in a
+        # small dark pool of its own light. Nothing here reaches further
+        # than the corona: the field round a star is where the fight is,
+        # and it stays clear. `edge` is the point of no return, drawn as a
+        # dashed ring that turns slowly - a boundary, not a target.
         r = self.r
-        f.glow(self.x, self.y, r * 2.6, "glow", 1)
-        # Broad, broken orbital tracks distinguish the gravity well from a
-        # static star. They sit behind the hot corona and stay deliberately
-        # sparse so ships and shots remain easy to follow.
-        for i, (rx, ry) in enumerate(((2.9, 1.9), (4.1, 2.6))):
-            phase = self.t * (0.10 if i == 0 else -0.07) + i * 1.8
-            last = None
-            for j in range(33):
-                a = phase + j * (TAU * 0.72 / 32.0)
-                point = (self.x + r * rx * math.cos(a),
-                         self.y + r * ry * math.sin(a))
-                if last is not None:
-                    f.line(last[0], last[1], point[0], point[1],
-                           ramp("star", 0.78), 1)
-                last = point
-        for k in (1.0, 0.62, 0.3):
-            f.arc(self.x, self.y, r * k, A("flash"), 3, step=0.9)
-        for i in range(5):
-            a0 = self.t * (0.6 + 0.3 * i) + i * 1.3
-            a1 = a0 + 1.4 + 0.5 * math.sin(self.t * 1.7 + i * 2.0)
-            rr = r * (1.25 + 0.18 * i) + 0.6 * math.sin(self.t * 3.0 + i)
-            f.arc(self.x, self.y, rr, ramp("fire", 0.25 + 0.15 * i), 2,
-                  step=2.2 + 0.8 * i, a0=a0, a1=a1)
+        f.glow(self.x, self.y, r * 2.0, "sun", 1)
+        f.disc(self.x, self.y, r, lambda k: ramp("fire", 0.35 * k), 3,
+               fuzz=0.3)
+        for i in range(4):
+            a0 = self.t * (0.6 + 0.3 * i) + i * 1.6
+            a1 = a0 + 1.2 + 0.5 * math.sin(self.t * 1.7 + i * 2.0)
+            rr = r * (1.2 + 0.15 * i) + 0.5 * math.sin(self.t * 3.0 + i)
+            f.arc(self.x, self.y, rr, ramp("fire", 0.3 + 0.15 * i), 2,
+                  step=1.6 + 0.6 * i, a0=a0, a1=a1)
+        if edge:
+            att = ramp("fire", 0.8)
+            for i in range(10):
+                a0 = -self.t * 0.25 + i * TAU / 10
+                f.arc(self.x, self.y, edge, att, 1, step=2.0,
+                      a0=a0, a1=a0 + TAU / 20)

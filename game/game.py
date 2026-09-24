@@ -107,13 +107,13 @@ class Game(GameRender):
         return self.lerp(0.60, 1.80, self.diff()) * k
 
     def rock_count(self):
-        # Rocks are scenery now - something to dodge while you fight, not the
-        # objective. A handful, and never a field to grind through - except
-        # in a debris field, where the field is the point.
-        n = min(1 + self.level // 5, 3)
-        if self.cur == "debris":
-            n = min(n * 2 + 2, 8)
-        return n
+        # Rocks belong to the debris field and nowhere else. Everywhere else
+        # the sky is the fleet and you: a boulder drifting through an open
+        # fight was one more thing to read on a screen that is already busy,
+        # and it blurred what made the debris sector its own place.
+        if self.cur != "debris":
+            return 0
+        return min((1 + self.level // 5) * 2 + 2, 8)
 
     ROCK_INFLOW = 4.0       # debris field: seconds between fresh boulders
 
@@ -267,6 +267,7 @@ class Game(GameRender):
         self.wave_kills = self.wave_lost = 0
         self.wave_peak = 1
         self.cur = "open"          # the sector you are in
+        self.draw_fps = config.FPS # what the frame loop is drawing at
         self.sun = None
         self.haze = None           # the nebula's cloud, when there is one
         self.sector_order = list(SECTOR_CYCLE)
@@ -298,8 +299,21 @@ class Game(GameRender):
         w, h = self.world
         if self.sun is None:
             return w / 2, h / 2
-        # Not in the star: above it, outside the pull that matters.
-        return w / 2, (h / 2 - max(h * 0.30, self.sun.r * 4.0)) % h
+        # Not in the star: as far from it as the field allows, out where
+        # its pull is a nudge. The spot used to be a third of the way up
+        # from the centre, well inside the point of no return - a ship
+        # spawned there was lost before its grace period ran out.
+        return w * 0.10, h * 0.14
+
+    def sun_edge(self):
+        """The star's point of no return for the flight model in use: for
+        arcade, where the drift outruns the commanded speed; for classic,
+        where the pull outruns the thrust."""
+        if self.sun is None:
+            return None
+        if self.mode == "arcade":
+            return self.sun.horizon(Ship.ARCADE_SPEED / self.ARCADE_DRIFT)
+        return self.sun.horizon(Ship.ACC_CLASSIC)
 
     def spawn_ship(self):
         x, y = self.spawn_point()
@@ -575,7 +589,7 @@ class Game(GameRender):
         self.bullets = [b for b in self.bullets if not b.hostile]
         self.shocks.append(Shock(s.x, s.y, 4, max(self.world) * 0.8, 0.9))
         self.shocks.append(Shock(s.x, s.y, 2, 40, 0.4))
-        self.shake = max(self.shake, 0.4)
+        self.shake = max(self.shake, 0.22)
         self.flash("BOMB", 0.9)
         beep()
         for foe in list(self.foes):
@@ -599,7 +613,7 @@ class Game(GameRender):
             s.hit_flash = 0.28
             self.shocks.append(Shock(s.x, s.y, 8, 30, 0.4))
             self.burst(s.x, s.y, 16, 70, 0.4)
-            self.shake = max(self.shake, 0.15)
+            self.shake = max(self.shake, 0.10)
             self.flash("SHIELD DOWN", 1.0)
             return False
         self.kill_ship()
@@ -836,8 +850,8 @@ class Game(GameRender):
             if sun.inside(foe.x, foe.y, w):
                 self.kill_foe(foe, drops=False)  # you may well have put it there
         s = self.ship
-        if s is None:
-            return
+        if s is None or s.invuln > 0:
+            return          # a fresh ship gets its grace from the star too
         ax, ay = sun.pull(s.x, s.y, w)
         if self.mode == "classic":
             s.vx += ax * dt
@@ -1056,7 +1070,7 @@ class Game(GameRender):
         self.fires.append(Fireball(m.x, m.y, Mine.BLAST * 0.5, 0.3))
         self.smoke(m.x, m.y, 9, 26, 1.8)
         self.burst(m.x, m.y, 26, 90, 0.5)
-        self.shake = max(self.shake, 0.22)
+        self.shake = max(self.shake, 0.15)
         for foe in list(self.foes):
             if foe.arrive > 0:
                 continue
@@ -1107,7 +1121,6 @@ class Game(GameRender):
         self.smoke(a.x, a.y, 2 + a.size, 15, 1.0)
         self.shocks.append(Shock(a.x, a.y, a.r * 0.5, a.r * 2.4,
                                  0.22 + 0.08 * a.size))
-        self.shake = max(self.shake, 0.05 * a.size)
         self.asteroids.remove(a)
         if a.size > 1:
             d = self.diff()
@@ -1129,7 +1142,6 @@ class Game(GameRender):
         self.burst(a.x, a.y, 8 + 6 * a.size, 40 + 20 * a.size, 0.45)
         self.smoke(a.x, a.y, 3 + a.size, 20, 1.1)
         self.shocks.append(Shock(a.x, a.y, a.r * 0.5, a.r * 2.8, 0.3))
-        self.shake = max(self.shake, 0.08 + 0.04 * a.size)
         self.asteroids.remove(a)
         if foe.hit(Asteroid.DMG[a.size]):
             self.kill_foe(foe)
@@ -1173,7 +1185,12 @@ class Game(GameRender):
         self.wreck(foe, 3 if foe.kind == "scout" else 4)
         self.shocks.append(Shock(foe.x, foe.y, foe.r * 0.4, foe.r * 3.2,
                                  0.4 + foe.r * 0.012))
-        self.shake = max(self.shake, 0.14 + foe.r * 0.012)
+        # A shake moves every cell on the screen, every frame it lasts, and
+        # that is the one thing a slow terminal cannot absorb. So it is kept
+        # for the moments that earn it - a capital ship, your own death, a
+        # bomb, a mine - and a line ship's death is its fireball and flash.
+        if foe.boss:
+            self.shake = max(self.shake, 0.22)
         if foe.boss:
             self.shocks.append(Shock(foe.x, foe.y, 2, foe.r * 5.5, 0.9))
             # A capital ship gets a second, slower ring inside the first and
@@ -1204,7 +1221,7 @@ class Game(GameRender):
         self.fires.append(Fireball(s.x, s.y, 22.0, 0.55))
         self.smoke(s.x, s.y, 14, 30, 2.0)
         self.shocks.append(Shock(s.x, s.y, 3, 46, 0.65))
-        self.shake = 0.45
+        self.shake = 0.28
         self.ship = None
         # The magazine stays with you. Losing a ship is punishment enough,
         # and a fresh ship with an empty gun is a second death waiting.

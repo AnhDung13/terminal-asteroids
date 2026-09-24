@@ -7,7 +7,7 @@ import os
 
 TAU = math.tau
 MIN_W, MIN_H = 40, 12
-FPS = 60.0
+FPS = 120.0
 
 # The field the game was designed on, in braille dots: a 110x34 terminal. A
 # smaller terminal does not get a smaller game - it gets this game seen from
@@ -19,6 +19,13 @@ FPS = 60.0
 # in: they get more field, as they always have.
 DESIGN_W, DESIGN_H = 216, 128
 FIT_MIN = 0.5           # below this a hull is too few dots to read
+
+# How many frames a second get drawn. The simulation always runs at FPS;
+# this is only how often the result is put on the terminal. None means
+# automatic: every frame while the terminal keeps up, every other frame -
+# 30 a second - when writing a frame starts taking most of the budget, as
+# it does in an editor's built-in terminal. `--fps N` pins it.
+DRAW_FPS = None
 
 # Which sector wave 1 opens in. None is the game as designed: open space,
 # then a shuffled tour of the others from wave 11. Set a name - "nebula",

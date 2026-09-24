@@ -120,11 +120,13 @@ def init_colors():
         PAL["ast2"] = _mk(180)
         PAL["ast1"] = _mk(210)
         PAL["flash"] = _mk(231, True)
-        PAL["foe1"] = _mk(84, True)      # interceptor
+        PAL["hull_metal"] = _mk(250)     # enemy armor under class accents
+        PAL["hull_panel"] = _mk(245)     # fine seams inside the armor
+        PAL["foe1"] = _mk(51, True)      # cyan interceptor
         PAL["foe2"] = _mk(215, True)     # gunship
-        PAL["foe3"] = _mk(207, True)     # marauder - mini boss
-        PAL["foe4"] = _mk(203, True)     # dreadnought - boss
-        PAL["foe5"] = _mk(153)           # tender - unarmed, and not bold
+        PAL["foe3"] = _mk(198, True)     # magenta marauder
+        PAL["foe4"] = _mk(141, True)     # violet dreadnought
+        PAL["foe5"] = _mk(84, True)      # green tender
         PAL["foeshot"] = _mk(120)
         PAL["hot"] = _mk(214, True)      # a rock fragment you have launched
         PAL["mine"] = _mk(196, True)
@@ -151,7 +153,9 @@ def init_colors():
         # ramp would eat the table, and a bright one would swallow the text
         # drawn over it.
         BGS["neb"] = [53, 17]          # nebula haze
-        BGS["glow"] = [88, 52, 236]    # firelight, and a star's corona
+        BGS["glow"] = [88, 52, 236]    # firelight
+        BGS["sun"] = [52, 235]         # the pool of light under a star
+        BGS["hull"] = [236]            # armor under enemy wireframes
     else:
         W, Y, R, C, M, G = (curses.COLOR_WHITE, curses.COLOR_YELLOW,
                             curses.COLOR_RED, curses.COLOR_CYAN,
@@ -163,11 +167,13 @@ def init_colors():
         PAL["ast2"] = _mk(Y)
         PAL["ast1"] = _mk(M, True)
         PAL["flash"] = _mk(W, True)
-        PAL["foe1"] = _mk(G, True)
+        PAL["hull_metal"] = _mk(W)
+        PAL["hull_panel"] = _mk(W) | curses.A_DIM
+        PAL["foe1"] = _mk(C, True)
         PAL["foe2"] = _mk(Y, True)
         PAL["foe3"] = _mk(M, True)
-        PAL["foe4"] = _mk(R, True)
-        PAL["foe5"] = _mk(W)
+        PAL["foe4"] = _mk(M, True)
+        PAL["foe5"] = _mk(G, True)
         PAL["foeshot"] = _mk(G)
         PAL["hot"] = _mk(Y, True)
         PAL["mine"] = _mk(R, True)

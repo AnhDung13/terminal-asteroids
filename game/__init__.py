@@ -49,7 +49,7 @@ from .game import Game
 from .hulls import draw_hull, flip
 from .input import (KEYMAP, KITTY_POP, KITTY_PUSH, KITTY_QUERY, PRESS,
                     RELEASE, REPEAT, Keys, Reader, kitty_probe, tty_write)
-from .app import loop, run
+from .app import Pacer, default_draw_fps, loop, run
 from .render import BAR_EMPTY, BAR_FULL, GameRender
 from .screen import BRAILLE, DOTS, PX, PY, Field, Screen
 from .sectors import (SECTOR_CYCLE, SECTOR_WAVES, SECTORS, Mine, Nebula,
@@ -65,6 +65,6 @@ __all__ = [
     "SOUND", "STATE_FILE", "Screen", "Shock", "Ship", "Star", "Sun", "TAU",
     "WEAPONS", "WEAPON_KINDS", "beep", "bgramp", "draw_hull", "flip",
     "init_colors", "keytest", "kitty_probe", "loop", "on", "ramp",
-    "report_keytest", "run", "selftest", "config", "scale", "tty_write",
+    "report_keytest", "Pacer", "default_draw_fps", "run", "selftest", "config", "scale", "tty_write",
     "wrap_delta",
 ]

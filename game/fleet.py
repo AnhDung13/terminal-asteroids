@@ -3,13 +3,16 @@
 import math
 import random
 
-from .colors import A, ramp
+from .colors import A, BGS, ramp
 from . import config
 from .config import TAU, wrap_delta
 from .entities import Bullet
-from .hulls import (DREADNOUGHT, DREADNOUGHT_ENG, GUNSHIP, GUNSHIP_ENG,
-                    MARAUDER, MARAUDER_ENG, SCOUT, SCOUT_ENG, TENDER,
-                    TENDER_ENG, draw_hull)
+from .hulls import (DREADNOUGHT, DREADNOUGHT_DETAIL, DREADNOUGHT_ENG,
+                    DREADNOUGHT_TRIM, GUNSHIP, GUNSHIP_DETAIL, GUNSHIP_ENG,
+                    GUNSHIP_TRIM, MARAUDER, MARAUDER_DETAIL, MARAUDER_ENG,
+                    MARAUDER_TRIM, SCOUT, SCOUT_DETAIL, SCOUT_ENG, SCOUT_TRIM,
+                    TENDER, TENDER_DETAIL, TENDER_ENG, TENDER_TRIM, draw_hull,
+                    fill_hull)
 
 
 class Raider:
@@ -52,23 +55,38 @@ class Raider:
     SPECS = {
         "scout": dict(r=8.5, hp=1, speed=64.0, cd=2.3, shots=1,
                       jitter=0.26, bsp=78.0, value=150, shape=SCOUT,
-                      eng=SCOUT_ENG, keep=46.0, col="foe1", turn=5.0,
+                      detail=SCOUT_DETAIL, plates=(0,), trim=SCOUT_TRIM,
+                      eng=SCOUT_ENG, keep=46.0,
+                      col="foe1", turn=5.0,
                       lead=0.0),
         "gunship": dict(r=12.0, hp=2, speed=46.0, cd=2.05, shots=2,
                         jitter=0.16, bsp=88.0, value=400, shape=GUNSHIP,
-                        eng=GUNSHIP_ENG, keep=86.0, col="foe2", turn=3.4,
+                        detail=GUNSHIP_DETAIL, plates=(0, 3, 4, 9, 10),
+                        trim=GUNSHIP_TRIM,
+                        eng=GUNSHIP_ENG, keep=86.0,
+                        col="foe2", turn=3.4,
                         lead=1.0),
         "marauder": dict(r=15.0, hp=11, speed=32.0, cd=1.6, shots=2,
                          jitter=0.13, bsp=80.0, value=2500, shape=MARAUDER,
-                         eng=MARAUDER_ENG, keep=88.0, col="foe3",
+                         detail=MARAUDER_DETAIL, plates=(0, 1, 2, 11, 12, 15),
+                         trim=MARAUDER_TRIM,
+                         eng=MARAUDER_ENG, keep=88.0,
+                         col="foe3",
                          turn=2.4, lead=0.0),
         "dread": dict(r=24.0, hp=28, speed=23.0, cd=1.4, shots=3,
                       jitter=0.10, bsp=74.0, value=12000, shape=DREADNOUGHT,
-                      eng=DREADNOUGHT_ENG, keep=98.0, col="foe4",
+                      detail=DREADNOUGHT_DETAIL,
+                      plates=(0, 1, 2, 3, 4, 5, 6, 7, 8, 14),
+                      trim=DREADNOUGHT_TRIM,
+                      eng=DREADNOUGHT_ENG,
+                      keep=98.0, col="foe4",
                       turn=1.7, lead=0.6),
         "tender": dict(r=11.0, hp=3, speed=46.0, cd=9.9, shots=0,
                        jitter=0.0, bsp=1.0, value=600, shape=TENDER,
-                       eng=TENDER_ENG, keep=0.0, col="foe5", turn=2.6,
+                       detail=TENDER_DETAIL, plates=(0, 1, 2),
+                       trim=TENDER_TRIM,
+                       eng=TENDER_ENG, keep=0.0,
+                       col="foe5", turn=2.6,
                        lead=0.0),
     }
     BOSSES = ("marauder", "dread")
@@ -112,6 +130,9 @@ class Raider:
         self.bsp = s["bsp"] * (0.85 + 0.35 * diff)
         self.value = s["value"]
         self.shape = s["shape"]
+        self.detail = s["detail"]
+        self.plates = tuple(self.shape[i] for i in s["plates"])
+        self.trim = s["trim"]
         self.eng = s["eng"]
         self.keep = s["keep"]
         self.col = s["col"]
@@ -480,7 +501,11 @@ class Raider:
                 f.dot(mx, my + o, att, 2)
         if self.arrive > 0 and int(self.arrive * 14) % 2 == 0:
             return
-        att = A("flash") if self.flash > 0 else A(self.col)
+        att = A("flash") if self.flash > 0 else A("hull_metal")
+        fill_hull(f, self.x, self.y, self.ang, self.r, self.plates,
+                  BGS.get("hull", [0])[0], 2)
+        draw_hull(f, self.x, self.y, self.ang, self.r, self.detail,
+                  A("flash") if self.flash > 0 else A("hull_panel"), 3)
         hurt = 1.0 - max(0.0, self.hp) / self.hp0
         dark = 0
         if self.boss and hurt > self.SCAR_FROM and self.flash <= 0:
@@ -494,6 +519,12 @@ class Raider:
                           A("dim") if i in gone else att, 4)
         else:
             draw_hull(f, self.x, self.y, self.ang, self.r, self.shape, att, 4)
+        # Bright class-colored edges sit over the pale armor. They are kept
+        # separate from the damageable plates, so hull and AI stay unchanged.
+        trim = A("flash") if self.flash > 0 else A(self.col)
+        if dark and hurt > self.VENT_FROM:
+            trim = A("dim")
+        draw_hull(f, self.x, self.y, self.ang, self.r, self.trim, trim, 5)
         spool = 0.0
         if self.escape is not None:
             # The jump drive spooling up: a ring that fills in as the charge

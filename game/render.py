@@ -10,7 +10,6 @@ import time
 
 from . import config
 from .colors import A, ramp
-from .config import TAU
 from .entities import WEAPONS
 from .screen import Field
 from .sectors import SECTORS
@@ -32,9 +31,13 @@ class GameRender:
         if self.shake > 0:
             # A decaying oscillation, not per-frame noise: reads as a thump
             # rather than a flicker.
+            # The phase is held for two frames at a time: a shake redraws
+            # the whole screen for every offset it takes, and thirty a
+            # second still reads as a thump.
             amp = min(2.0, self.shake * 7.0)
-            cx += int(round(amp * math.sin(self.shake * 47.0)))
-            cy += int(round(amp * 0.55 * math.sin(self.shake * 39.0 + 1.7)))
+            ph = round(self.shake * 30.0) / 30.0
+            cx += int(round(amp * math.sin(ph * 47.0)))
+            cy += int(round(amp * 0.55 * math.sin(ph * 39.0 + 1.7)))
         f = Field(sc, cx, cy, *self.world, zoom=self.fit)
 
         # In a nebula anything past sensor range is a blip: the fleet a
@@ -55,7 +58,7 @@ class GameRender:
         for st in self.stars:
             st.draw(f, neb)
         if self.sun is not None:
-            self.sun.draw(f)
+            self.sun.draw(f, self.sun_edge())
         if self.sweep > 0:
             x = self.world[0] * (1.0 - self.sweep / 0.45)
             for y in range(0, self.world[1], 2):
@@ -90,16 +93,9 @@ class GameRender:
                 f.dot(b.x, b.y, A("frame"), 3)
             else:
                 b.draw(f)
-        if fog:
-            # The edge of what you can see, as a band rather than as a line:
-            # the haze thickens until it closes over. Each ring is started at
-            # a different angle so they do not comb into radial spokes.
-            for i in range(5):
-                k = i / 4.0
-                a0 = i * 1.13
-                f.arc(self.ship.x, self.ship.y, vis * (0.86 + 0.18 * k),
-                      ramp("neb", 0.45 + 0.5 * k), 0,
-                      step=2.6 + 11.0 * k * k, a0=a0, a1=a0 + TAU)
+        # The edge of sensor range is not drawn. It used to be a band of
+        # rings round the ship; the blips past it say where it is well
+        # enough, and the rings were one more thing to read through.
         if self.ship:
             self.ship.draw(f)
         for p in self.pops:
@@ -281,6 +277,11 @@ class GameRender:
         keys = " KEYS %s " % ("exact" if self.exact_keys else "inferred")
         if len(tag) + 2 * len(keys) + 8 < self.sw:
             sc.text(2, y, keys, A("ui_hi") if self.exact_keys else A("dim"))
+        # And whether the terminal is keeping up: only said when it is not.
+        if self.draw_fps < config.FPS:
+            draw = " DRAW %d " % round(self.draw_fps)
+            if len(tag) + 2 * len(keys) + 2 * len(draw) + 10 < self.sw:
+                sc.text(2 + len(keys), y, draw, A("warn"))
 
     def draw_banner(self, sc):
         if self.msg_t <= 0:

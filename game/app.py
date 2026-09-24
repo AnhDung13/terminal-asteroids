@@ -1,8 +1,10 @@
 """The frame loop: read input, step the sim, draw, sleep the remainder."""
 
 import curses
+import os
 import time
 
+from . import config
 from .colors import init_colors
 from .config import FPS, MIN_H, MIN_W
 from .game import Game
@@ -50,11 +52,71 @@ def cramped_notice(stdscr, w, h):
                 pass
 
 
+# Terminals that fall behind without ever blocking the write. The pacer
+# below can only see a draw that takes long; macOS Terminal.app takes the
+# bytes at once and then renders them late, braille slowest of all, since
+# its default font has no braille glyphs and every cell falls back to
+# another face. It gets half rate by default; --fps 60 asks for more.
+SLOW_TERMINALS = {"Apple_Terminal": 240.0}
+
+
+def default_draw_fps(env=os.environ):
+    """The draw rate to use when none is asked for: None means adaptive."""
+    return SLOW_TERMINALS.get(env.get("TERM_PROGRAM", ""))
+
+
+class Pacer:
+    """Decides which frames get drawn.
+
+    The simulation runs every frame regardless; this only rations the
+    drawing. Putting a frame on the terminal is the one cost the game does
+    not control - a slow emulator blocks the write, the frame runs long,
+    and the next step of the simulation has to cover the lost time in one
+    jump, which is what a stutter is. So the cost of each draw is watched,
+    and when its running average eats most of the frame budget the game
+    draws every other frame instead: the terminal gets twice as long per
+    picture, the simulation keeps its 60 steps a second, and the controls
+    feel the same. It goes back to every frame once the terminal is idle
+    again, with enough gap between the two thresholds not to flap.
+    """
+
+    SLOW = 0.70     # of the frame budget: a draw this costly drops to 1/2
+    FAST = 0.30     # and one this cheap, on average, goes back to every frame
+
+    def __init__(self, frame, pin=None):
+        self.frame = frame
+        self.every = max(1, int(round(FPS / pin))) if pin else 1
+        self.pinned = pin is not None
+        self.cost = 0.0             # running average of one draw's cost
+        self.n = 0
+
+    def due(self):
+        """Whether this frame is one that gets drawn."""
+        return self.n % self.every == 0
+
+    def tick(self, drew, spent):
+        """Account for a frame: `drew` says whether it was drawn, `spent`
+        is how long the draw took if so."""
+        self.n += 1
+        if not drew or self.pinned:
+            return
+        self.cost = spent if self.cost == 0.0 else self.cost * 0.85 + spent * 0.15
+        if self.every == 1 and self.cost > self.frame * self.SLOW:
+            self.every = 2
+        elif self.every == 2 and self.cost < self.frame * self.FAST:
+            self.every = 1
+
+    @property
+    def fps(self):
+        return FPS / self.every
+
+
 def loop(stdscr, game, keys, reader):
     prev_state = game.state
     now = time.perf_counter()
     last = now
     frame = 1.0 / FPS
+    pacer = Pacer(frame, config.DRAW_FPS or default_draw_fps())
     cramped = None          # (w, h) while the terminal is below the minimum
     while True:
         now = time.perf_counter()
@@ -128,12 +190,17 @@ def loop(stdscr, game, keys, reader):
             prev_state = game.state
         keys.tick(now)
         game.advance(dt, keys)
+        drew = cramped or pacer.due()
+        t0 = time.perf_counter()
         if cramped:
             cramped_notice(stdscr, *cramped)
-        else:
+        elif drew:
+            game.draw_fps = pacer.fps
             game.draw(stdscr)
-        stdscr.noutrefresh()
-        curses.doupdate()
+        if drew:
+            stdscr.noutrefresh()
+            curses.doupdate()
+        pacer.tick(drew, time.perf_counter() - t0)
 
         slack = frame - (time.perf_counter() - now)
         if slack > 0:
