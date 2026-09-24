@@ -31,9 +31,13 @@ class GameRender:
         if self.shake > 0:
             # A decaying oscillation, not per-frame noise: reads as a thump
             # rather than a flicker.
+            # The phase is held for two frames at a time: a shake redraws
+            # the whole screen for every offset it takes, and thirty a
+            # second still reads as a thump.
             amp = min(2.0, self.shake * 7.0)
-            cx += int(round(amp * math.sin(self.shake * 47.0)))
-            cy += int(round(amp * 0.55 * math.sin(self.shake * 39.0 + 1.7)))
+            ph = round(self.shake * 30.0) / 30.0
+            cx += int(round(amp * math.sin(ph * 47.0)))
+            cy += int(round(amp * 0.55 * math.sin(ph * 39.0 + 1.7)))
         f = Field(sc, cx, cy, *self.world, zoom=self.fit)
 
         # In a nebula anything past sensor range is a blip: the fleet a
@@ -48,10 +52,13 @@ class GameRender:
                                           o.x, o.y) > vis
 
         neb = "neb" if self.cur == "nebula" else "star"
+        if self.haze is not None:
+            self.haze.draw(f, self.clock)
+        self.draw_sector_ambience(f)
         for st in self.stars:
             st.draw(f, neb)
         if self.sun is not None:
-            self.sun.draw(f)
+            self.sun.draw(f, self.sun_edge())
         if self.sweep > 0:
             x = self.world[0] * (1.0 - self.sweep / 0.45)
             for y in range(0, self.world[1], 2):
@@ -60,6 +67,8 @@ class GameRender:
             p.draw(f)
         for s in self.shocks:
             s.draw(f)
+        for fb in self.fires:
+            fb.draw(f)
         for d in self.debris:
             d.draw(f)
         for a in self.asteroids:
@@ -84,8 +93,9 @@ class GameRender:
                 f.dot(b.x, b.y, A("frame"), 3)
             else:
                 b.draw(f)
-        if fog:            # the edge of what you can see
-            f.arc(self.ship.x, self.ship.y, vis, A("frame"), 0, step=7.0)
+        # The edge of sensor range is not drawn. It used to be a band of
+        # rings round the ship; the blips past it say where it is well
+        # enough, and the rings were one more thing to read through.
         if self.ship:
             self.ship.draw(f)
         for p in self.pops:
@@ -109,6 +119,19 @@ class GameRender:
             y0 = sc.h * 2 // 3 - len(self.card) // 2
             y0 = max(2, min(y0, sc.h - len(self.card) - 4))
             self.panel(sc, self.card, y0=y0)
+
+    def draw_sector_ambience(self, f):
+        """Low-contrast motion that gives the debris sector its own sky."""
+        if self.cur != "debris":
+            return
+        w, h = self.world
+        dust = ramp("smoke", 0.35)
+        for i in range(18):
+            speed = 5.0 + (i % 4) * 2.0
+            x = (i * 97.0 + self.clock * speed) % w
+            y = (i * 53.0 + math.sin(self.clock * 0.28 + i * 1.7) * 8.0) % h
+            length = 1.5 + (i % 3) * 0.8
+            f.line(x, y, x - length, y + 0.35, dust, 0)
 
     # -- chrome -----------------------------------------------------------
     def draw_frame(self, sc):
@@ -254,6 +277,11 @@ class GameRender:
         keys = " KEYS %s " % ("exact" if self.exact_keys else "inferred")
         if len(tag) + 2 * len(keys) + 8 < self.sw:
             sc.text(2, y, keys, A("ui_hi") if self.exact_keys else A("dim"))
+        # And whether the terminal is keeping up: only said when it is not.
+        if self.draw_fps < config.FPS:
+            draw = " DRAW %d " % round(self.draw_fps)
+            if len(tag) + 2 * len(keys) + 2 * len(draw) + 10 < self.sw:
+                sc.text(2 + len(keys), y, draw, A("warn"))
 
     def draw_banner(self, sc):
         if self.msg_t <= 0:

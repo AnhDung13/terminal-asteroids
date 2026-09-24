@@ -3,9 +3,10 @@
 import math
 import random
 
-from .colors import A, ramp
+from .colors import A, bgramp, ramp
 from . import config
 from .config import TAU, wrap_delta
+from .screen import DOTS, PX
 
 
 # Every SECTOR_WAVES waves - after each dreadnought - the fleet jumps and you
@@ -23,6 +24,136 @@ SECTORS = {
                  note="a star pulls everything in - keep off"),
 }
 SECTOR_CYCLE = ("nebula", "debris", "mines", "star")
+
+
+# The order a cell's dots light up in as it fills: scattered rather than
+# top to bottom, so a half-full cell reads as an even grey instead of as a
+# solid half-block.
+_FILL_ORDER = ((0, 0), (1, 2), (1, 0), (0, 3), (0, 2), (1, 1), (1, 3), (0, 1))
+# Four rotations of it, so that neighbouring cells at the same density do
+# not light the same dot. With one order the thinnest haze - a single dot a
+# cell - came out as a regular lattice of top-left dots, which reads as a
+# grid laid over the sky rather than as anything in it.
+FILL = []
+for _v in range(4):
+    _order = _FILL_ORDER[_v * 2:] + _FILL_ORDER[:_v * 2]
+    _bits = [0]
+    for _fx, _fy in _order:
+        _bits.append(_bits[-1] | DOTS[_fx][_fy])
+    FILL.append(_bits)
+
+
+class Nebula:
+    """The haze a nebula sector is actually made of.
+
+    Braille is a binary medium - a dot is lit or it is not - so shading has
+    to come from how many of a cell's eight dots are lit rather than from
+    how bright any one of them is. That is the whole trick: a low-frequency
+    noise field sampled once per *cell*, turned into a dot count and a
+    colour off the `neb` ramp, with a background wash under the thickest of
+    it. The count is capped well short of eight and the colour kept to the
+    dark half of the ramp: this is weather to see the fight through, and a
+    cloud you cannot see a gunship in is not atmosphere, it is a wall.
+
+    The field is built once, in the field's own cell grid, and then scrolled
+    - so a screen full of cloud costs one array lookup per cell per frame
+    instead of a noise sample per cell per frame. It is rebuilt only when
+    the grid changes size, which means the sector survives a resize without
+    anyone having to remember to tell it.
+    """
+
+    # (lattice across, lattice down, weight). Two octaves: one that decides
+    # where the cloud is, one that gives its edges something to fray on.
+    OCTAVES = ((5, 3, 1.0), (11, 7, 0.45))
+    FLOOR = 0.58       # below this the sky is simply empty
+    MAX = 5            # dots per cell at the thickest: a haze, not a wall
+    WASH_FROM = 5      # only the thickest cloud gets a background at all
+    DRIFT = 1.1        # units/s: slower than the furthest star
+
+    def __init__(self, seed=None):
+        self.seed = random.randrange(1 << 30) if seed is None else seed
+        self.cols = self.rows = 0
+        self.span = []
+
+    def build(self, cols, rows):
+        """Sample the noise once, and keep only the cells that are lit.
+
+        Roughly half the sky comes out empty, and skipping those rows-worth
+        of nothing is most of what keeps this affordable.
+        """
+        rnd = random.Random(self.seed)
+        acc = [[0.0] * cols for _ in range(rows)]
+        for lx, ly, amp in self.OCTAVES:
+            g = [[rnd.random() for _ in range(lx)] for _ in range(ly)]
+            for cy in range(rows):
+                fy = cy * ly / rows
+                y0 = int(fy)
+                ty = fy - y0
+                ty = ty * ty * (3.0 - 2.0 * ty)          # smoothstep
+                r0, r1 = g[y0 % ly], g[(y0 + 1) % ly]
+                row = acc[cy]
+                for cx in range(cols):
+                    fx = cx * lx / cols
+                    x0 = int(fx)
+                    tx = fx - x0
+                    tx = tx * tx * (3.0 - 2.0 * tx)
+                    i, j = x0 % lx, (x0 + 1) % lx
+                    a = r0[i] + (r0[j] - r0[i]) * tx
+                    b = r1[i] + (r1[j] - r1[i]) * tx
+                    row[cx] += (a + (b - a) * ty) * amp
+        # Stretched to the range it actually came out with, not to the range
+        # it could theoretically have had. Smoothed noise averaged over two
+        # octaves huddles around the middle and never visits its own
+        # extremes, so scaling by the sum of the weights would put the top of
+        # the ladder - the thickest, brightest cloud, and the only cloud that
+        # earns a background - permanently out of reach.
+        lo = min(map(min, acc))
+        spread = (max(map(max, acc)) - lo) or 1.0
+        self.span = []
+        for cy in range(rows):
+            lit = []
+            for cx, v in enumerate(acc[cy]):
+                k = ((v - lo) / spread - self.FLOOR) / (1.0 - self.FLOOR)
+                if k > 0.0:
+                    n = min(self.MAX, int(k ** 0.75 * (self.MAX + 1)))
+                    if n:
+                        # Which rotation a cell gets is drawn here, off the
+                        # same seeded stream, and then kept: anything derived
+                        # from the cell's address comes out as a regular
+                        # weave, and anything drawn per frame would boil.
+                        lit.append((cx, n, FILL[rnd.getrandbits(2)][n]))
+            self.span.append(lit)
+        self.cols, self.rows = cols, rows
+
+    def draw(self, f, t):
+        cols, rows = f.cols, f.rows
+        if (cols, rows) != (self.cols, self.rows):
+            self.build(cols, rows)
+        # Denser cloud is brighter cloud, and the thickest of it also
+        # colours the space between its own dots. Both ladders are worked
+        # out once a frame rather than once a cell.
+        att = [ramp("neb", 1.0 - 0.5 * i / self.MAX) for i in range(9)]
+        wash = [bgramp("neb", 0.6) if i >= self.WASH_FROM else 0
+                for i in range(9)]
+        drift = t * self.DRIFT * f.z / PX
+        # Straight at the screen, with the field's own offsets folded in:
+        # this is the innermost loop in the renderer, and the wrapping and
+        # the unit conversion Field would do are both already done here.
+        tile, lay = f.s.tile, f.s.wash
+        sx, sy = f.cx0, f.cy0
+        for cy in range(rows):
+            y = cy + sy
+            # Each row steps to its next column at its own moment. Stepped
+            # together, the whole sky moved one cell in one frame - eight
+            # hundred cells rewritten at once, a hitch every two seconds on
+            # a terminal that was otherwise keeping up.
+            off = int(drift + cy / rows) % cols
+            for cx, n, bits in self.span[cy]:
+                x = (cx - off) % cols + sx
+                tile(x, y, bits, att[n], 0)
+                b = wash[n]
+                if b:
+                    lay(x, y, b, 0)
 
 
 class Mine:
@@ -53,6 +184,13 @@ class Mine:
 
     def draw(self, f):
         att = A("mine")
+        # A slow proximity pulse gives the minefield a recognizable warning
+        # rhythm without competing with the brighter mine body and horns.
+        pulse = 0.5 + 0.5 * math.sin(self.t * 2.2)
+        rr = self.R + 2.0 + pulse * 2.2
+        f.arc(self.x, self.y, rr, ramp("shock", 0.62), 1,
+              step=4.8, a0=self.t * 0.35,
+              a1=self.t * 0.35 + TAU * (0.48 + 0.22 * pulse))
         f.arc(self.x, self.y, self.R, att, 3, step=1.3)
         for i in range(4):                     # four contact horns
             a = i * TAU / 4 + TAU / 8
@@ -71,10 +209,17 @@ class Sun:
     survivable and a straight line into it is not. Touch it and you are
     gone. Shots bend round it, so a curved shot past the star is on the
     table; so is the fleet's habit of orbiting you straight through it.
+
+    The pull is sized so that the point of no return - where it outruns
+    your engine - sits just outside the corona, about two and a bit radii
+    out, and that point is drawn: a dashed ring, so the rule "do not cross
+    the ring" can be read off the screen. It used to sit at over four radii
+    with nothing to mark it, and a ship spawned inside it was dead before
+    the player had done anything at all.
     """
 
-    G = 320000.0        # px^3/s^2: 32 px/s^2 of pull at 100 px
-    MAX_PULL = 240.0    # px/s^2, close in
+    G = 70000.0         # px^3/s^2: 7 px/s^2 of pull at 100 px, 44 at 40
+    MAX_PULL = 200.0    # px/s^2, close in
 
     def __init__(self, world):
         self.t = random.uniform(0, TAU)
@@ -101,14 +246,31 @@ class Sun:
     def update(self, dt):
         self.t += dt
 
-    def draw(self, f):
-        # A hard bright core, and a corona of loose arcs turning round it.
+    def horizon(self, accel):
+        """How far out the pull still beats an engine that can make `accel`
+        - the point of no return, in field units."""
+        return math.sqrt(self.G / min(accel, self.MAX_PULL))
+
+    def draw(self, f, edge=None):
+        # A solid core, white at the heart and yellow at a boiling rim, in a
+        # corona of short arcs turning at different rates, standing in a
+        # small dark pool of its own light. Nothing here reaches further
+        # than the corona: the field round a star is where the fight is,
+        # and it stays clear. `edge` is the point of no return, drawn as a
+        # dashed ring that turns slowly - a boundary, not a target.
         r = self.r
-        for k in (1.0, 0.62, 0.3):
-            f.arc(self.x, self.y, r * k, A("flash"), 3, step=0.9)
-        for i in range(5):
-            a0 = self.t * (0.6 + 0.3 * i) + i * 1.3
-            a1 = a0 + 1.4 + 0.5 * math.sin(self.t * 1.7 + i * 2.0)
-            rr = r * (1.25 + 0.18 * i) + 0.6 * math.sin(self.t * 3.0 + i)
-            f.arc(self.x, self.y, rr, ramp("fire", 0.25 + 0.15 * i), 2,
-                  step=2.2 + 0.8 * i, a0=a0, a1=a1)
+        f.glow(self.x, self.y, r * 2.0, "sun", 1)
+        f.disc(self.x, self.y, r, lambda k: ramp("fire", 0.35 * k), 3,
+               fuzz=0.3)
+        for i in range(4):
+            a0 = self.t * (0.6 + 0.3 * i) + i * 1.6
+            a1 = a0 + 1.2 + 0.5 * math.sin(self.t * 1.7 + i * 2.0)
+            rr = r * (1.2 + 0.15 * i) + 0.5 * math.sin(self.t * 3.0 + i)
+            f.arc(self.x, self.y, rr, ramp("fire", 0.3 + 0.15 * i), 2,
+                  step=1.6 + 0.6 * i, a0=a0, a1=a1)
+        if edge:
+            att = ramp("fire", 0.8)
+            for i in range(10):
+                a0 = -self.t * 0.25 + i * TAU / 10
+                f.arc(self.x, self.y, edge, att, 1, step=2.0,
+                      a0=a0, a1=a0 + TAU / 20)

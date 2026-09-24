@@ -33,7 +33,7 @@ the ones above it, so there is no cycle to unpick:
     diagnostics  --selftest and --keytest
 """
 
-from .colors import A, PAL, RAMPS, init_colors, ramp
+from .colors import A, BGS, PAL, RAMPS, bgramp, init_colors, on, ramp
 # config and scale are re-exported as modules, never as values: the size
 # dial moves while the game runs, so a `from .config import SCALE` here
 # would hand everyone the number the game started with.
@@ -42,27 +42,29 @@ from .config import (FPS, MIN_H, MIN_W, SOUND, STATE_FILE, TAU, beep,
                      wrap_delta)
 from .diagnostics import keytest, report_keytest, selftest
 from .entities import (GEAR, GEAR_ODDS, ITEMS, WEAPON_KINDS, WEAPONS,
-                       Asteroid, Bullet, Debris, Particle, Pickup, Pop,
-                       Shock, Ship, Star)
+                       Asteroid, Bullet, Debris, Fireball, Particle, Pickup,
+                       Pop, Shock, Ship, Star)
 from .fleet import Raider
 from .game import Game
 from .hulls import draw_hull, flip
 from .input import (KEYMAP, KITTY_POP, KITTY_PUSH, KITTY_QUERY, PRESS,
                     RELEASE, REPEAT, Keys, Reader, kitty_probe, tty_write)
-from .app import loop, run
+from .app import Pacer, default_draw_fps, loop, run
 from .render import BAR_EMPTY, BAR_FULL, GameRender
 from .screen import BRAILLE, DOTS, PX, PY, Field, Screen
-from .sectors import SECTOR_CYCLE, SECTOR_WAVES, SECTORS, Mine, Sun
+from .sectors import (SECTOR_CYCLE, SECTOR_WAVES, SECTORS, Mine, Nebula,
+                      Sun)
 
 __all__ = [
-    "A", "Asteroid", "BAR_EMPTY", "BAR_FULL", "BRAILLE", "Bullet", "DOTS",
-    "Debris", "FPS", "Field", "GEAR", "GEAR_ODDS", "Game", "GameRender",
-    "ITEMS", "KEYMAP", "KITTY_POP", "KITTY_PUSH", "KITTY_QUERY", "Keys",
-    "MIN_H", "MIN_W", "Mine", "PAL", "PRESS", "PX", "PY", "Particle",
-    "Pickup", "Pop", "RAMPS", "RELEASE", "REPEAT", "Raider", "Reader",
-    "SECTORS", "SECTOR_CYCLE", "SECTOR_WAVES", "SOUND", "STATE_FILE",
-    "Screen", "Shock", "Ship", "Star", "Sun", "TAU", "WEAPONS",
-    "WEAPON_KINDS", "beep", "draw_hull", "flip", "init_colors", "keytest",
-    "kitty_probe", "loop", "ramp", "report_keytest", "run", "selftest",
-    "config", "scale", "tty_write", "wrap_delta",
+    "A", "Asteroid", "BAR_EMPTY", "BAR_FULL", "BGS", "BRAILLE", "Bullet",
+    "DOTS", "Debris", "FPS", "Field", "Fireball", "GEAR", "GEAR_ODDS",
+    "Game", "GameRender", "ITEMS", "KEYMAP", "KITTY_POP", "KITTY_PUSH",
+    "KITTY_QUERY", "Keys", "MIN_H", "MIN_W", "Mine", "Nebula", "PAL",
+    "PRESS", "PX", "PY", "Particle", "Pickup", "Pop", "RAMPS", "RELEASE",
+    "REPEAT", "Raider", "Reader", "SECTORS", "SECTOR_CYCLE", "SECTOR_WAVES",
+    "SOUND", "STATE_FILE", "Screen", "Shock", "Ship", "Star", "Sun", "TAU",
+    "WEAPONS", "WEAPON_KINDS", "beep", "bgramp", "draw_hull", "flip",
+    "init_colors", "keytest", "kitty_probe", "loop", "on", "ramp",
+    "report_keytest", "Pacer", "default_draw_fps", "run", "selftest", "config", "scale", "tty_write",
+    "wrap_delta",
 ]

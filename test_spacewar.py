@@ -418,6 +418,17 @@ class RockCoverTests(unittest.TestCase):
     """A rock belongs to nobody: it stops rounds from either side, breaks to
     rounds from either side, and kills any hull that runs into it."""
 
+    def test_rocks_only_in_the_debris_field(self):
+        g = game()
+        for sector in ("open", "nebula", "mines", "star"):
+            g.cur = sector
+            for lv in (1, 5, 12, 40):
+                g.level = lv
+                self.assertEqual(g.rock_count(), 0, (sector, lv))
+        g.cur = "debris"
+        g.level = 1
+        self.assertGreaterEqual(g.rock_count(), 4)
+
     def test_rock_stops_hostile_round_and_breaks(self):
         g = hold(game())
         a = ast.Asteroid(50, 50, 3, 1.0)
@@ -724,6 +735,21 @@ class SectorTests(unittest.TestCase):
         self.assertEqual(len(g.pickups), 1)
         self.assertEqual(len(g.asteroids), g.rock_count())   # fresh rocks
 
+    def test_start_sector_setting_opens_there_then_tours_the_rest(self):
+        g = game()
+        try:
+            ast.config.START_SECTOR = "mines"
+            self.assertEqual(g.sector(1), "mines")
+            self.assertEqual(g.sector(10), "mines")
+            tour = [g.sector(1 + 10 * i) for i in range(1, 4)]
+            self.assertEqual(sorted(tour), ["debris", "nebula", "star"])
+            self.assertEqual(g.sector(41), tour[0])     # and round again
+            ast.config.START_SECTOR = "open"
+            self.assertEqual(g.sector(1), "open")
+        finally:
+            ast.config.START_SECTOR = None
+        self.assertEqual(g.sector(1), "open")
+
     def test_nebula_fogs_the_far_field(self):
         g = self.jump(hold(game()), "nebula")
         g.ship.x, g.ship.y = 100, 60
@@ -796,6 +822,43 @@ class SectorTests(unittest.TestCase):
         g.bullets = [Bullet(g.sun.x, g.sun.y, 0, 0, 5)]
         g.gravity(1 / 60)
         self.assertEqual(g.bullets, [])
+
+    def test_star_sector_spawn_is_survivable_in_both_models(self):
+        for mode in ("arcade", "classic"):
+            try:
+                ast.config.START_SECTOR = "star"
+                g = game()
+                g.mode = mode
+                g.start_game()
+            finally:
+                ast.config.START_SECTOR = None
+            self.assertIsInstance(g.sun, Sun)
+            # One unarmed tender keeps the wave alive so the sector does not
+            # roll over while we watch; nothing else on the field.
+            g.foes = [Raider("tender", 200, 120, 0.0, g.world)]
+            g.queue = []
+            keys = Keys()
+            for i in range(7 * 60):          # seven seconds, hands off
+                g.advance(1 / 60, keys)
+            self.assertIsInstance(g.sun, Sun)
+            self.assertIsNotNone(g.ship, mode)
+            self.assertEqual(g.lives, 3, mode)
+            # and the pull at the spawn is a nudge, not a current
+            ax, ay = g.sun.pull(*g.spawn_point(), g.world)
+            self.assertLess(math.hypot(ax, ay) * g.ARCADE_DRIFT,
+                            0.2 * Ship.ARCADE_SPEED)
+
+    def test_star_horizon_sits_just_outside_the_corona(self):
+        g = self.jump(hold(game()), "star")
+        for mode in ("arcade", "classic"):
+            g.mode = mode
+            edge = g.sun_edge()
+            self.assertGreater(edge, g.sun.r * 1.6)
+            self.assertLess(edge, g.sun.r * 3.0)
+        # outside the ring an arcade ship at full speed does gain ground
+        g.mode = "arcade"
+        ax, ay = g.sun.pull(g.sun.x + g.sun_edge() * 1.05, g.sun.y, g.world)
+        self.assertLess(abs(ax) * g.ARCADE_DRIFT, Ship.ARCADE_SPEED)
 
     def test_star_kills_the_ship_and_spares_the_spawn(self):
         g = self.jump(hold(game()), "star")
@@ -972,6 +1035,61 @@ class RaiderTests(unittest.TestCase):
             seen.add(f.phase)
         self.assertEqual(seen, {"orbit", "charge", "retreat"})
 
+    def test_volley_size_never_climbs_more_than_one_round(self):
+        ladder = [Raider.SPECS[k]["shots"]
+                  for k in ("scout", "gunship", "marauder", "dread")]
+        self.assertEqual(ladder, [1, 2, 2, 3])
+        self.assertTrue(all(0 <= b - a <= 1 for a, b in zip(ladder, ladder[1:])))
+
+    def test_boss_cycles_every_pattern_without_repeating(self):
+        for kind in Raider.PATTERNS:
+            f = Raider(kind, 0, 0, 0.0, (400, 200))
+            drawn = [f.next_pattern() for _ in range(40)]
+            self.assertEqual(set(drawn), set(Raider.PATTERNS[kind]))
+            self.assertFalse(any(a == b for a, b in zip(drawn, drawn[1:])))
+
+    def test_boss_salvo_fires_over_time_then_empties(self):
+        w = (400, 200)
+        f = Raider("marauder", 200, 100, 0.0, w)
+        f.arrive, f.cd = 0, 0.0
+        f.deck, f.last = ["burst"], None
+        s, bullets = Ship(50, 100), []
+        f.update(1 / 120, w, s, bullets)
+        first = len(bullets)
+        self.assertLess(first, f.shots)          # a burst is not all at once
+        for _ in range(60):
+            f.update(1 / 120, w, s, bullets)
+        self.assertGreaterEqual(len(bullets), f.shots)
+        self.assertEqual(f.salvo, [])
+
+    def test_boxed_ships_never_cross_the_edge(self):
+        w = (220, 136)
+        for kind in Raider.BOXED:
+            f = Raider(kind, 5, 3, 0.5, w)        # spawned over the seam
+            f.arrive = 0
+            s, bullets = Ship(215, 130), []      # you, hugging the far corner
+            for i in range(30 * 60):
+                if i == 900:
+                    s.x, s.y = 3, 3              # then the near one
+                f.update(1 / 60, w, s, bullets)
+                m = f.margin()
+                self.assertTrue(m <= f.x <= w[0] - m and m <= f.y <= w[1] - m,
+                                (kind, f.x, f.y))
+
+    def test_boxed_ship_aims_across_the_box_not_the_seam(self):
+        w = (220, 136)
+        f = Raider("dread", 30, 68, 0.5, w)
+        f.arrive, f.cd = 0, 0.0
+        s, bullets = Ship(215, 68), []           # across the seam, 35 away
+        for _ in range(2):                       # a queued pattern fires next frame
+            f.update(1 / 60, w, s, bullets)
+        self.assertTrue(bullets)
+        self.assertTrue(all(b.vx > 0 for b in bullets))   # fired the long way
+
+    def test_boss_standoff_fits_inside_the_field(self):
+        for kind in Raider.BOSSES:
+            self.assertLess(Raider.SPECS[kind]["keep"], 220 / 2)
+
     def test_hurt_dread_throws_rings(self):
         w = (400, 200)
         f = Raider("dread", 200, 100, 1.0, w)
@@ -982,6 +1100,46 @@ class RaiderTests(unittest.TestCase):
         for _ in range(2 * 120):
             f.update(1 / 120, w, s, bullets)
         self.assertGreaterEqual(len(bullets), f.RING_SHOTS)
+
+
+class PacerTests(unittest.TestCase):
+    def test_draws_every_frame_while_the_terminal_keeps_up(self):
+        fps = ast.config.FPS
+        p = ast.Pacer(1 / fps)
+        for _ in range(120):
+            self.assertTrue(p.due())
+            p.tick(True, 0.1 / fps)          # a tenth of the budget
+        self.assertEqual(p.fps, fps)
+
+    def test_slow_draws_drop_to_half_rate_and_recover(self):
+        fps = ast.config.FPS
+        p = ast.Pacer(1 / fps)
+        for _ in range(60):
+            p.tick(p.due(), 0.9 / fps)       # most of the budget: choking
+        self.assertEqual(p.every, 2)
+        self.assertEqual(p.fps, fps / 2)
+        for _ in range(200):
+            p.tick(p.due(), 0.05 / fps)      # cheap again
+        self.assertEqual(p.every, 1)
+
+    def test_slow_terminals_get_their_listed_rate_and_others_adapt(self):
+        from game.app import SLOW_TERMINALS
+        for name, rate in SLOW_TERMINALS.items():
+            self.assertEqual(ast.default_draw_fps({"TERM_PROGRAM": name}), rate)
+            self.assertGreaterEqual(ast.Pacer(1 / 60, pin=rate).every, 1)
+        self.assertIsNone(ast.default_draw_fps({"TERM_PROGRAM": "iTerm.app"}))
+        self.assertIsNone(ast.default_draw_fps({}))
+
+    def test_pinned_rate_never_adapts(self):
+        fps = ast.config.FPS
+        p = ast.Pacer(1 / fps, pin=fps / 2)
+        self.assertEqual(p.every, 2)
+        for _ in range(200):
+            p.tick(p.due(), 2.0 / fps)
+        self.assertEqual(p.every, 2)
+        for _ in range(200):
+            p.tick(p.due(), 0.01 / fps)
+        self.assertEqual(p.every, 2)
 
 
 class KeysTests(unittest.TestCase):
